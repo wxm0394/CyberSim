@@ -1,0 +1,6 @@
+{
+  "name": "DEAD AIR — 城市静默 | Narrative Hacker Simulator",
+  "description": "A narrative-driven psychological thriller and open-world hacker RPG set in 2028 Greyhaven. Explore physical scenes, investigate digital forensics on your Linux workstation, correlate chronological evidence timelines, and navigate corporate conspiracy in Chapter 1: The Ghost in the Machine.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

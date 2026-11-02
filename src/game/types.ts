@@ -22,9 +22,34 @@ export type FirstPhoneChoice =
   | 'CONTACT_ALLY'
   | null;
 
+export type ChapterEndingId =
+  | 'ENDING_A_SIGNAL_LEAKS'
+  | 'ENDING_B_DIRTY_BARGAIN'
+  | 'ENDING_C_FALL_GUY'
+  | null;
+
+export interface ChapterEndingReport {
+  id: Exclude<ChapterEndingId, null>;
+  code: 'ENDING A' | 'ENDING B' | 'ENDING C';
+  title: string;
+  titleZh: string;
+  subtitle: string;
+  subtitleZh: string;
+  epilogue: string;
+  epilogueZh: string;
+  characterFates: {
+    name: string;
+    status: string;
+    statusZh: string;
+  }[];
+  chapterTwoHook: string;
+  chapterTwoHookZh: string;
+}
+
 export interface NarrativeFlags {
   voicemail_played: boolean;
   first_choice: FirstPhoneChoice;
+  first_choice_locked: boolean;
   archive_inspected: boolean;
   timeline_correlated: boolean;
   laundromat_meeting_done: boolean;
@@ -34,8 +59,11 @@ export interface NarrativeFlags {
   discovered_lantern: boolean;
   corporate_suspicion: number; // 0 to 100
   journalist_contact: boolean;
+  rhea_allied: boolean;
   player_exposure: number; // 0 to 100
   discovered_eli_account_reuse: boolean;
+  soc_warning_triggered: boolean;
+  camera_tracked: boolean;
   current_objective: string;
 }
 
@@ -75,6 +103,8 @@ export interface VirtualFileEntry {
   size: string;
   modifiedAt: string;
   unlocked: boolean;
+  requiresKeyId?: string;
+  requiresScene?: SceneId;
   unlocksEvidenceId?: string;
   content: string;
 }
@@ -146,16 +176,29 @@ export interface TerminalOutputLine {
   tone: 'command' | 'output' | 'highlight' | 'error' | 'system';
 }
 
+export interface SceneTransitionCheck {
+  allowed: boolean;
+  reason: string;
+  reasonZh: string;
+}
+
 export interface DeadAirState {
+  saveVersion: number;
   shellState: GameShellState;
   currentScene: SceneId;
+  unlockedScenes: SceneId[];
   activeOverlay: ActiveOverlay;
   activeComputerApp: ComputerAppId;
   activeDialogueCharacterId: string | null;
   selectedHotspotId: string | null;
   clockTime: string;
   monologueBanner: string;
+  lastFeedbackBanner: string | null;
   soundEnabled: boolean;
+  debugMode: boolean;
+  completedEvents: string[];
+  inspectedFiles: string[];
+  endingId: ChapterEndingId;
   flags: NarrativeFlags;
   hotspots: Record<SceneId, SceneHotspot[]>;
   evidence: EvidenceArtifact[];

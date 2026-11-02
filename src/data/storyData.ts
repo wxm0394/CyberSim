@@ -1,4 +1,6 @@
 import {
+  ChapterEndingId,
+  ChapterEndingReport,
   CharacterProfile,
   DeadAirState,
   EvidenceArtifact,
@@ -10,6 +12,143 @@ import {
   SceneId,
   VirtualFileEntry,
 } from '../game/types';
+
+export const CURRENT_SAVE_VERSION = 2;
+
+export const CHAPTER_ONE_ENDINGS: Record<
+  Exclude<ChapterEndingId, null>,
+  ChapterEndingReport
+> = {
+  ENDING_A_SIGNAL_LEAKS: {
+    id: 'ENDING_A_SIGNAL_LEAKS',
+    code: 'ENDING A',
+    title: 'THE SIGNAL LEAKS',
+    titleZh: '信号破壁 · 真相曝光',
+    subtitle:
+      'Whistleblower Proof Transmitted to The Greyhaven Ledger Before Blackout',
+    subtitleZh: '断网前一秒，完整加密证据链已通过记者死信通道公之于众',
+    epilogue:
+      'When Vespera Corporate Security severed your fiber line and flashed "WE KNOW WHO YOU ARE" across your monitor, their containment team was already thirty seconds too late. Because you correlated the 14-minute blackout timeline, kept exposure below critical thresholds, and established a trusted dead-drop with investigative journalist Rhea Solis and ally Nadia Park, the complete Project LANTERN audit dump mirrored straight to The Greyhaven Ledger’s air-gapped press server. By 06:00 AM, front-page headlines expose Vespera’s illegal municipal blacklisting matrix—and the fraudulent reactivation of your revoked ID e.ward_09.',
+    epilogueZh:
+      '当 Vespera 企业安全部切断你的光纤并在屏幕上打出“WE KNOW WHO YOU ARE.”时，他们的封锁小组已经晚了三十秒。由于你完整串联了 14 分钟日志黑箱时间线、将暴露值控制在安全阈值内，并与调查记者 Rhea Solis 及盟友 Nadia Park 建立了稳固信任，整套“灯塔计划”（Project LANTERN）底层审计库已通过自动死信开关同步至《灰港纪事报》的物理隔离服务器。清晨六点，头版头条引爆全城政治与企业危机，洗清了工号 e.ward_09 被栽赃的罪名。',
+    characterFates: [
+      {
+        name: 'Eli Ward (e.ward_09)',
+        status:
+          'Underground in Port District with Daniel Cross; cleared by cryptographic timestamp proof.',
+        statusZh: '在导师 Daniel Cross 协助下转入港区安全屋，时间戳铁证洗刷了替罪羊指控。',
+      },
+      {
+        name: 'Nadia Park',
+        status:
+          'Entered protective custody with City Council oversight committee as key witness.',
+        statusZh: '以关键污点证人身份进入市议会特别调查委员会保护程序。',
+      },
+      {
+        name: 'Rhea Solis',
+        status:
+          'Published the Pulitzer-shortlisted "Project LANTERN" investigative series.',
+        statusZh: '刊发《灰港纪事报》头版调查特稿，迫使市政厅冻结与 Vespera 的数据合约。',
+      },
+      {
+        name: 'Marcus Hale',
+        status:
+          'Subpoenaed by federal regulators; mobilizing private contractors for retaliation.',
+        statusZh: '遭到联邦监管机构传唤，正暗中调动私人安保力量准备反扑。',
+      },
+    ],
+    chapterTwoHook:
+      'CHAPTER II PREVIEW — "THE SUBPOENA WAR": With Vespera’s stock in freefall, Executive Enclave architects activate their off-grid backup cluster in Sector 09.',
+    chapterTwoHookZh:
+      '第二章伏笔 ——《传票战争》：Vespera 股价崩盘之际，高管飞地启动了位于九号扇区的离线备份集群，而你将作为技术证人直面核心幕后主使。',
+  },
+  ENDING_B_DIRTY_BARGAIN: {
+    id: 'ENDING_B_DIRTY_BARGAIN',
+    code: 'ENDING B',
+    title: 'A DIRTY BARGAIN',
+    titleZh: '暗影交易 · 灰色筹码',
+    subtitle:
+      'Truth Secured in Cold Storage, But Forced Into MOTH’s Underground Pact',
+    subtitleZh: '你掌握了完整铁证却孤立无援，被迫接受神秘中间人 MOTH 的条件',
+    epilogue:
+      'Your screen goes black with the words "WE KNOW WHO YOU ARE." You hold the decrypted Project LANTERN ledger and proof that your revoked ID (e.ward_09) was framed—but without a verified media dead-drop or sufficient mutual trust with Nadia Park, publishing now would be crushed by Vespera’s legal and security apparatus. Seconds after the blackout, MOTH hijacks your handset’s baseband processor with a cold offer: an armored extraction route out of Apartment 4B in exchange for exclusive access to Vespera’s Executive Enclave keys.',
+    epilogueZh:
+      '屏幕在“WE KNOW WHO YOU ARE.”的警告中陷入黑暗。你手里握着“灯塔计划”的完整加密账本与 e.ward_09 被栽赃的铁证，但因为缺乏可靠的媒体发布通道或与 Nadia 的信任破裂，贸然公开只会被 Vespera 瞬间抹杀。断连数秒后，神秘中间人 MOTH 直接接管了你的手机基带，开出了一份冰冷的交易：用 Vespera 高管飞地的根密钥，换取你今夜安全撤离 4B 公寓的通道。',
+    characterFates: [
+      {
+        name: 'Eli Ward (e.ward_09)',
+        status:
+          'Extracted via MOTH’s darknet relay network; holding the LANTERN vault as leverage.',
+        statusZh: '经由 MOTH 的地下暗网通道撤离公寓，将“灯塔”账本作为保命筹码。',
+      },
+      {
+        name: 'Nadia Park',
+        status:
+          'Vanished into transit hubs alone; distrustful of your next move.',
+        statusZh: '独自消失在城际交通枢纽中，对你的立场充满戒备。',
+      },
+      {
+        name: 'MOTH',
+        status:
+          'Gained leverage over your investigation; demands Enclave infiltration in Chapter 2.',
+        statusZh: '掌握了你的把柄与撤离路线，要求你在第二章为其渗透高管飞地。',
+      },
+      {
+        name: 'Marcus Hale',
+        status:
+          'Found Apartment 4B empty; classified you as a high-priority covert threat.',
+        statusZh: '带队突袭 4B 公寓扑空，将你列为最高优先级地下威胁。',
+      },
+    ],
+    chapterTwoHook:
+      'CHAPTER II PREVIEW — "DEBT TO THE MOTH": To clear your name, you must first pay off MOTH’s price inside Vespera’s Port District data bunker.',
+    chapterTwoHookZh:
+      '第二章伏笔 ——《飞蛾之债》：为了洗清罪名，你必须先履行这笔危险的暗影交易，潜入港区数据地堡。',
+  },
+  ENDING_C_FALL_GUY: {
+    id: 'ENDING_C_FALL_GUY',
+    code: 'ENDING C',
+    title: 'THE FALL GUY',
+    titleZh: '替罪之羊 · 完美栽赃',
+    subtitle:
+      'High Exposure or Incomplete Forensics Allowed Vespera to Frame e.ward_09',
+    subtitleZh: '过高的暴露风险或残缺的证据链，让你彻底沦为企业阴谋的替罪羊',
+    epilogue:
+      'As "WE KNOW WHO YOU ARE" burns into your monitor, heavy boots echo up the tenement stairwell outside Apartment 4B. Triggered by high cellular/network exposure or an uncorroborated forensic chain, Director Marcus Hale’s containment unit locks down your building before you can transmit a single verified packet. By morning commute, Greyhaven cable news broadcasts your old employee photo: former support engineer Eli Ward (e.ward_09) is officially indicted for the unauthorized October 29 data sabotage, while Project LANTERN continues operating in total secrecy.',
+    epilogueZh:
+      '当“WE KNOW WHO YOU ARE.”在屏幕上亮起时，4B 公寓门外的老旧楼梯间已响起密集的战术靴声。由于行动暴露度/企业怀疑值过高或未能建立完整的取证时间线，安全总监 Marcus Hale 的封锁小队在你发出任何有效证据前彻底接管了现场。次日早高峰，灰港市各大新闻频道循环播放着你的旧工牌照片：前支持工程师 Eli Ward（e.ward_09）被正式指控为数据破坏案的唯一黑客，而“灯塔计划”依旧在阴影中主宰着整座城市。',
+    characterFates: [
+      {
+        name: 'Eli Ward (e.ward_09)',
+        status:
+          'Detained under corporate-espionage indictment; awaiting arraignment in Greyhaven Metro Detention.',
+        statusZh: '因企业间谍与数据破坏指控被捕，关押于灰港市看守所等待提审。',
+      },
+      {
+        name: 'Nadia Park',
+        status:
+          'Intercepted at 4th Ave transit station after Vespera traced your trail.',
+        statusZh: '在第四大道轻轨站被 Vespera 安全部门截获并强制签署封口令。',
+      },
+      {
+        name: 'Rhea Solis',
+        status:
+          'Left without cryptographic proof; her story spiked by legal injunction.',
+        statusZh: '因缺乏密码学铁证，其调查报道被法院禁令强行压下。',
+      },
+      {
+        name: 'Marcus Hale',
+        status:
+          'Commended by Vespera’s board for swift containment of the "Ward Incident."',
+        statusZh: '因迅速平息“沃德泄密事件”获得 Vespera 董事会嘉奖。',
+      },
+    ],
+    chapterTwoHook:
+      'CHAPTER II PREVIEW — "PRISONER TRANSFER": On route to federal court, an unknown hacker overrides the transport van’s municipal traffic grid.',
+    chapterTwoHookZh:
+      '第二章伏笔 ——《囚车劫持》：在押送联邦法院途中，整条街区的市政交通信号灯突然被未知黑客接管。',
+  },
+};
 
 export const INITIAL_HOTSPOTS: Record<SceneId, SceneHotspot[]> = {
   APARTMENT_NIGHT: [
@@ -96,9 +235,9 @@ export const INITIAL_HOTSPOTS: Record<SceneId, SceneHotspot[]> = {
       x: 87,
       y: 52,
       detailText:
-        'Step out into the 02:40 AM rain toward the 24-Hour Coin Laundry on 4th Avenue.',
+        'Step out into the 02:40 AM rain toward the 24-Hour Coin Laundry on 4th Avenue. Requires completing your phone response, inspecting at least 2 forensic files, and correlating the timeline first.',
       detailTextZh:
-        '推门步入凌晨两点的冷雨，前往第四大道的 24 小时自助洗衣店与 Nadia 碰面。',
+        '推门步入凌晨两点的冷雨，前往第四大道的 24 小时自助洗衣店与 Nadia 碰面（需先完成手机决策、调查至少 2 份取证文件并完成时间线关联）。',
       inspected: false,
       triggersScene: 'STREET_NIGHT',
     },
@@ -189,9 +328,9 @@ export const INITIAL_HOTSPOTS: Record<SceneId, SceneHotspot[]> = {
       x: 84,
       y: 58,
       detailText:
-        'Head back to your apartment with the archive key before Vespera Corporate Security sweeps the block.',
+        'Head back to your apartment with the archive key before Vespera Corporate Security sweeps the block. Requires completing your conversation with Nadia and obtaining moth_archive.key.',
       detailTextZh:
-        '带着密钥从后巷撤离，赶在企业安全部封锁街区前返回公寓。',
+        '带着密钥从后巷撤离，赶在企业安全部封锁街区前返回公寓（需先完成与 Nadia 的三段对话并获取 moth_archive.key）。',
       inspected: false,
       triggersScene: 'APARTMENT_RETURN',
     },
@@ -409,6 +548,8 @@ Note: Every full-time sysadmin application in Greyhaven gets rejected within 30 
     size: '12.4 KB',
     modifiedAt: '01:55:52 AM',
     unlocked: false,
+    requiresKeyId: 'item_moth_usb',
+    requiresScene: 'APARTMENT_RETURN',
     unlocksEvidenceId: 'EV-06',
     content: `=== VESPERA CRYPTOGRAPHIC AUDIT VAULT (DECRYPTED VIA moth_archive.key) ===
 
@@ -506,7 +647,7 @@ export const INITIAL_CHARACTERS: CharacterProfile[] = [
     role: 'Senior Data Risk Analyst at Vespera',
     roleZh: 'Vespera 高级数据风险分析师',
     location: '24-Hour Coin Laundry (4th Ave)',
-    stance: 'Terrified Whistleblower / Partial Accomplice',
+    stance: 'Guarded Whistleblower',
     trust: 55,
     bio: 'Your former colleague at Vespera Data Solutions. She sent you incident_0427.zip before fleeing her apartment, but she is hiding her own early involvement in Project LANTERN.',
     currentNodeId: 'nadia_node_1',
@@ -535,7 +676,7 @@ export const INITIAL_CHARACTERS: CharacterProfile[] = [
             labelZh:
               '“你在风险分析部待了一整年，Nadia。为什么偏偏等到今晚才把这些日志发给我？”',
             nextNodeId: 'nadia_node_2',
-            trustDelta: -5,
+            trustDelta: -10,
             suspicionDelta: 5,
             unlocksEvidenceId: 'EV-05',
           },
@@ -563,7 +704,7 @@ export const INITIAL_CHARACTERS: CharacterProfile[] = [
             labelZh:
               '【质问她】“你自己的分析师工号也签在早期的‘灯塔’架构上，对吧？”',
             nextNodeId: 'nadia_node_3',
-            trustDelta: -10,
+            trustDelta: -15,
             unlocksEvidenceId: 'EV-05',
           },
           {
@@ -572,7 +713,7 @@ export const INITIAL_CHARACTERS: CharacterProfile[] = [
               '[Keep Distance] “Just give me the decryption key. I work alone from here.”',
             labelZh: '【保留底牌】“把解密密钥给我，接下来的事我独自处理。”',
             nextNodeId: 'nadia_node_3',
-            trustDelta: -5,
+            trustDelta: -10,
           },
         ],
       },
@@ -628,7 +769,7 @@ export const INITIAL_CHARACTERS: CharacterProfile[] = [
     role: 'Investigative Journalist — The Greyhaven Ledger',
     roleZh: '《灰港纪事报》独立调查记者',
     location: '4th Avenue Bodega Awning',
-    stance: 'Potential Ally',
+    stance: 'Potential Media Ally',
     trust: 65,
     bio: 'Independent journalist investigating algorithmic blacklisting and sudden tenant evictions across Greyhaven.',
     currentNodeId: 'rhea_node_1',
@@ -643,18 +784,18 @@ export const INITIAL_CHARACTERS: CharacterProfile[] = [
           {
             id: 'rhea_c1_share',
             label:
-              '“I have forensic logs from a covert system called Project LANTERN. Stay ready if I need to publish.”',
+              '“I have forensic logs from a covert system called Project LANTERN. Open an encrypted dead-drop—if I go dark, publish everything.”',
             labelZh:
-              '“我手里有‘灯塔计划’（Project LANTERN）的底层取证日志。如果我出事，随时准备发稿。”',
+              '“我手里有‘灯塔计划’（Project LANTERN）的底层取证日志。开启加密死信通道——如果我失联，立即全城发稿。”',
             trustDelta: 20,
-            exposureDelta: 8,
+            exposureDelta: 5,
           },
           {
             id: 'rhea_c1_cautious',
             label:
-              '“Just grabbing air, Rhea. Keep your head down tonight.”',
-            labelZh: '“只是出来透透气，Rhea。今晚千万小心。”',
-            trustDelta: 5,
+              '“Just grabbing air, Rhea. Keep your head down tonight—I can’t share anything yet.”',
+            labelZh: '“只是出来透透气，Rhea。今晚千万小心，我现在还不能透露任何事。”',
+            trustDelta: -5,
           },
         ],
       },
@@ -749,8 +890,10 @@ export function createInitialDeadAirState(
   initialShellState: GameShellState = 'title'
 ): DeadAirState {
   return {
+    saveVersion: CURRENT_SAVE_VERSION,
     shellState: initialShellState,
     currentScene: 'APARTMENT_NIGHT',
+    unlockedScenes: ['APARTMENT_NIGHT'],
     activeOverlay: 'NONE',
     activeComputerApp: 'FILES',
     activeDialogueCharacterId: 'nadia',
@@ -758,10 +901,16 @@ export function createInitialDeadAirState(
     clockTime: '02:17 AM',
     monologueBanner:
       'Greyhaven, 02:17 AM. Rain lashes the glass outside Apartment 4B. Your smartphone is vibrating on the desk beside your Linux workstation.',
+    lastFeedbackBanner: null,
     soundEnabled: true,
+    debugMode: false,
+    completedEvents: [],
+    inspectedFiles: [],
+    endingId: null,
     flags: {
       voicemail_played: false,
       first_choice: null,
+      first_choice_locked: false,
       archive_inspected: false,
       timeline_correlated: false,
       laundromat_meeting_done: false,
@@ -771,10 +920,13 @@ export function createInitialDeadAirState(
       discovered_lantern: false,
       corporate_suspicion: 15,
       journalist_contact: false,
+      rhea_allied: false,
       player_exposure: 10,
       discovered_eli_account_reuse: false,
+      soc_warning_triggered: false,
+      camera_tracked: false,
       current_objective:
-        'Check your vibrating smartphone [P] or inspect the objects in your apartment.',
+        'Step 1: Open your vibrating smartphone [P] and make your first response choice.',
     },
     hotspots: JSON.parse(JSON.stringify(INITIAL_HOTSPOTS)),
     evidence: JSON.parse(JSON.stringify(INITIAL_EVIDENCE)),

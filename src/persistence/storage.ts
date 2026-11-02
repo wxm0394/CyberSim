@@ -1,7 +1,177 @@
-import { DeadAirState } from '../game/types';
-import { createInitialDeadAirState } from '../data/storyData';
+import { DeadAirState, SceneId } from '../game/types';
+import {
+  CURRENT_SAVE_VERSION,
+  createInitialDeadAirState,
+} from '../data/storyData';
 
-const STORAGE_KEY = 'dead_air_save_v1';
+const STORAGE_KEY_V2 = 'dead_air_save_v2';
+const LEGACY_STORAGE_KEY_V1 = 'dead_air_save_v1';
+
+export function migrateDeadAirSave(
+  rawParsed: unknown,
+  autostart = false
+): DeadAirState {
+  const base = createInitialDeadAirState(autostart ? 'playing' : 'title');
+  if (!rawParsed || typeof rawParsed !== 'object') {
+    return base;
+  }
+
+  const candidate = rawParsed as Partial<DeadAirState>;
+  if (
+    !candidate.flags ||
+    typeof candidate.flags !== 'object' ||
+    !Array.isArray(candidate.evidence) ||
+    !Array.isArray(candidate.files) ||
+    !Array.isArray(candidate.characters)
+  ) {
+    return base;
+  }
+
+  const validScenes: SceneId[] = [
+    'APARTMENT_NIGHT',
+    'STREET_NIGHT',
+    'LAUNDROMAT',
+    'APARTMENT_RETURN',
+  ];
+  const currentScene: SceneId = validScenes.includes(
+    candidate.currentScene as SceneId
+  )
+    ? (candidate.currentScene as SceneId)
+    : 'APARTMENT_NIGHT';
+
+  // Merge evidence discovery state by ID
+  const migratedEvidence = base.evidence.map((baseEv) => {
+    const savedEv = candidate.evidence?.find((e) => e.id === baseEv.id);
+    if (!savedEv) return baseEv;
+    return {
+      ...baseEv,
+      discovered: Boolean(savedEv.discovered),
+      correlated: Boolean(savedEv.correlated),
+    };
+  });
+
+  const discoveredCount = migratedEvidence.filter((e) => e.discovered).length;
+  const firstChoice = candidate.flags.first_choice || null;
+  const firstChoiceLocked =
+    typeof candidate.flags.first_choice_locked === 'boolean'
+      ? candidate.flags.first_choice_locked
+      : firstChoice !== null;
+
+  const unlockedScenes: SceneId[] = Array.isArray(candidate.unlockedScenes)
+    ? (candidate.unlockedScenes.filter((s) =>
+        validScenes.includes(s)
+      ) as SceneId[])
+    : ['APARTMENT_NIGHT'];
+  if (!unlockedScenes.includes(currentScene)) {
+    unlockedScenes.push(currentScene);
+  }
+
+  const completedEvents = Array.isArray(candidate.completedEvents)
+    ? [...candidate.completedEvents]
+    : [];
+  if (firstChoiceLocked && !completedEvents.includes('event:first_phone_choice')) {
+    completedEvents.push('event:first_phone_choice');
+  }
+
+  const inspectedFiles = Array.isArray(candidate.inspectedFiles)
+    ? [...candidate.inspectedFiles]
+    : [];
+
+  // Merge inventory acquired state
+  const migratedInventory = base.inventory.map((baseItem) => {
+    const savedItem = candidate.inventory?.find((i) => i.id === baseItem.id);
+    return savedItem
+      ? { ...baseItem, acquired: Boolean(savedItem.acquired) }
+      : baseItem;
+  });
+
+  const hasMothKey = Boolean(
+    migratedInventory.find((i) => i.id === 'item_moth_usb')?.acquired
+  );
+
+  // Merge files unlock state
+  const migratedFiles = base.files.map((baseFile) => {
+    const savedFile = candidate.files?.find((f) => f.path === baseFile.path);
+    if (baseFile.path === '/home/eli/archive_vault/lantern_auth_audit.db') {
+      return {
+        ...baseFile,
+        unlocked: Boolean(savedFile?.unlocked || (hasMothKey && currentScene === 'APARTMENT_RETURN')),
+      };
+    }
+    return savedFile
+      ? { ...baseFile, unlocked: Boolean(savedFile.unlocked) }
+      : baseFile;
+  });
+
+  const trustNadia =
+    typeof candidate.flags.trust_nadia === 'number'
+      ? Math.min(100, Math.max(0, candidate.flags.trust_nadia))
+      : base.flags.trust_nadia;
+
+  const migratedCharacters = base.characters.map((baseChar) => {
+    const savedChar = candidate.characters?.find((c) => c.id === baseChar.id);
+    if (!savedChar) return baseChar;
+    return {
+      ...baseChar,
+      trust:
+        baseChar.id === 'nadia'
+          ? trustNadia
+          : typeof savedChar.trust === 'number'
+          ? savedChar.trust
+          : baseChar.trust,
+      currentNodeId: savedChar.currentNodeId || baseChar.currentNodeId,
+    };
+  });
+
+  return {
+    ...base,
+    saveVersion: CURRENT_SAVE_VERSION,
+    shellState: autostart
+      ? 'playing'
+      : candidate.shellState === 'gameover'
+      ? 'gameover'
+      : 'title',
+    currentScene,
+    unlockedScenes,
+    activeOverlay: 'NONE',
+    activeComputerApp: candidate.activeComputerApp || 'FILES',
+    clockTime: candidate.clockTime || base.clockTime,
+    monologueBanner: candidate.monologueBanner || base.monologueBanner,
+    lastFeedbackBanner: null,
+    soundEnabled:
+      typeof candidate.soundEnabled === 'boolean'
+        ? candidate.soundEnabled
+        : true,
+    debugMode: false,
+    completedEvents,
+    inspectedFiles,
+    endingId: candidate.endingId || null,
+    flags: {
+      ...base.flags,
+      ...candidate.flags,
+      first_choice: firstChoice,
+      first_choice_locked: firstChoiceLocked,
+      trust_nadia: trustNadia,
+      evidence_count: discoveredCount,
+      rhea_allied: Boolean(candidate.flags.rhea_allied),
+      soc_warning_triggered: Boolean(
+        candidate.flags.soc_warning_triggered ||
+          (candidate.flags.corporate_suspicion ?? 0) >= 25
+      ),
+      camera_tracked: Boolean(
+        candidate.flags.camera_tracked ||
+          (candidate.flags.player_exposure ?? 0) >= 20
+      ),
+    },
+    evidence: migratedEvidence,
+    files: migratedFiles,
+    inventory: migratedInventory,
+    characters: migratedCharacters,
+    phoneMessages: Array.isArray(candidate.phoneMessages)
+      ? candidate.phoneMessages
+      : base.phoneMessages,
+  };
+}
 
 export function loadDeadAirState(): DeadAirState {
   if (typeof window === 'undefined') {
@@ -11,18 +181,22 @@ export function loadDeadAirState(): DeadAirState {
   const autostart = params.get('autostart') === '1';
 
   try {
-    const raw = window.localStorage.getItem(STORAGE_KEY);
-    if (raw) {
-      const parsed = JSON.parse(raw) as DeadAirState;
-      if (parsed && parsed.flags && Array.isArray(parsed.evidence)) {
-        return {
-          ...parsed,
-          shellState: autostart ? 'playing' : 'title',
-        };
-      }
+    const rawV2 = window.localStorage.getItem(STORAGE_KEY_V2);
+    if (rawV2) {
+      const parsed = JSON.parse(rawV2);
+      return migrateDeadAirSave(parsed, autostart);
+    }
+
+    // Legacy v1 migration path
+    const rawV1 = window.localStorage.getItem(LEGACY_STORAGE_KEY_V1);
+    if (rawV1) {
+      const parsedV1 = JSON.parse(rawV1);
+      const migrated = migrateDeadAirSave(parsedV1, autostart);
+      saveDeadAirState(migrated);
+      return migrated;
     }
   } catch {
-    // Fallback to clean state
+    // Corrupted JSON falls back cleanly
   }
 
   return createInitialDeadAirState(autostart ? 'playing' : 'title');
@@ -31,16 +205,21 @@ export function loadDeadAirState(): DeadAirState {
 export function saveDeadAirState(state: DeadAirState): void {
   if (typeof window === 'undefined') return;
   try {
-    window.localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
+    const payload: DeadAirState = {
+      ...state,
+      saveVersion: CURRENT_SAVE_VERSION,
+    };
+    window.localStorage.setItem(STORAGE_KEY_V2, JSON.stringify(payload));
   } catch {
-    // Ignore quota errors
+    // Ignore storage quota errors
   }
 }
 
 export function clearDeadAirSave(): DeadAirState {
   if (typeof window !== 'undefined') {
     try {
-      window.localStorage.removeItem(STORAGE_KEY);
+      window.localStorage.removeItem(STORAGE_KEY_V2);
+      window.localStorage.removeItem(LEGACY_STORAGE_KEY_V1);
     } catch {
       // ignore
     }
@@ -54,7 +233,10 @@ class SoundController {
   private getContext(): AudioContext | null {
     if (typeof window === 'undefined') return null;
     if (!this.ctx) {
-      const AudioCtx = window.AudioContext || (window as unknown as { webkitAudioContext?: typeof AudioContext }).webkitAudioContext;
+      const AudioCtx =
+        window.AudioContext ||
+        (window as unknown as { webkitAudioContext?: typeof AudioContext })
+          .webkitAudioContext;
       if (AudioCtx) {
         this.ctx = new AudioCtx();
       }
@@ -65,7 +247,16 @@ class SoundController {
     return this.ctx;
   }
 
-  playTone(type: 'click' | 'terminal' | 'evidence' | 'phone' | 'warning' | 'blackout', enabled = true) {
+  playTone(
+    type:
+      | 'click'
+      | 'terminal'
+      | 'evidence'
+      | 'phone'
+      | 'warning'
+      | 'blackout',
+    enabled = true
+  ) {
     if (!enabled) return;
     const ctx = this.getContext();
     if (!ctx) return;

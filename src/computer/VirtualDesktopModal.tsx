@@ -1,5 +1,9 @@
 import React, { useState } from 'react';
 import { ComputerAppId, DeadAirState } from '../game/types';
+import {
+  canAccessVirtualFile,
+  hasMothArchiveKey,
+} from '../game/storyEngine';
 import { ForensicTimelineView } from '../components/ForensicTimelineView';
 import {
   FolderOpen,
@@ -10,6 +14,8 @@ import {
   FileCode,
   Send,
   ShieldAlert,
+  Lock,
+  CheckCircle2,
 } from 'lucide-react';
 
 interface VirtualDesktopModalProps {
@@ -30,16 +36,19 @@ export const VirtualDesktopModal: React.FC<VirtualDesktopModalProps> = ({
   onClose,
 }) => {
   const [cmdInput, setCmdInput] = useState('');
-  const unlockedFiles = state.files.filter((f) => f.unlocked);
   const [selectedFilePath, setSelectedFilePath] = useState<string>(
-    unlockedFiles[0]?.path || '/home/eli/Downloads/incident_0427/ntp_override.conf'
+    state.files[0]?.path ||
+      '/home/eli/Downloads/incident_0427/ntp_override.conf'
   );
   const [selectedEmailId, setSelectedEmailId] = useState<string>(
     state.emails[0]?.id || 'mail_1'
   );
 
   const activeFile =
-    unlockedFiles.find((f) => f.path === selectedFilePath) || unlockedFiles[0];
+    state.files.find((f) => f.path === selectedFilePath) || state.files[0];
+  const activeFileAccess = activeFile
+    ? canAccessVirtualFile(state, activeFile)
+    : { allowed: false, error: 'File not found' };
   const activeEmail =
     state.emails.find((e) => e.id === selectedEmailId) || state.emails[0];
 
@@ -55,19 +64,15 @@ export const VirtualDesktopModal: React.FC<VirtualDesktopModalProps> = ({
     { label: 'cat ntp_override.conf', cmd: 'cat ntp_override.conf' },
     { label: 'cat access_0427.log', cmd: 'cat access_0427.log' },
     { label: 'cat auth_shadow.dump', cmd: 'cat auth_shadow.dump' },
-    { label: 'cat lantern_schema_brief.txt', cmd: 'cat lantern_schema_brief.txt' },
+    {
+      label: 'cat lantern_schema_brief.txt',
+      cmd: 'cat lantern_schema_brief.txt',
+    },
     { label: 'verify (Correlate Timeline)', cmd: 'verify' },
-    ...(state.currentScene === 'APARTMENT_RETURN' ||
-    state.files.some(
-      (f) => f.path.includes('lantern_auth_audit.db') && f.unlocked
-    )
-      ? [
-          {
-            label: 'cat lantern_auth_audit.db (MOTH Vault)',
-            cmd: 'cat /home/eli/archive_vault/lantern_auth_audit.db',
-          },
-        ]
-      : []),
+    {
+      label: 'cat lantern_auth_audit.db (MOTH Vault)',
+      cmd: 'cat /home/eli/archive_vault/lantern_auth_audit.db',
+    },
   ];
 
   return (
@@ -126,7 +131,9 @@ export const VirtualDesktopModal: React.FC<VirtualDesktopModalProps> = ({
               }`}
             >
               <Clock className="w-3.5 h-3.5" />
-              <span>Timeline Correlation ({state.flags.evidence_count}/6)</span>
+              <span>
+                Timeline Correlation ({state.flags.evidence_count}/6)
+              </span>
             </button>
 
             <button
@@ -164,9 +171,19 @@ export const VirtualDesktopModal: React.FC<VirtualDesktopModalProps> = ({
                 <div className="text-xs font-mono uppercase tracking-wider text-[#4FA3B8] mb-2">
                   LOCAL FILESYSTEM · 点击文件立即执行取证分析
                 </div>
-                {unlockedFiles.map((file) => {
+                {state.files.map((file) => {
                   const isSelected = activeFile?.path === file.path;
-                  const isMothVault = file.path.includes('lantern_auth_audit.db');
+                  const access = canAccessVirtualFile(state, file);
+                  const isMothVault = file.path.includes(
+                    'lantern_auth_audit.db'
+                  );
+                  const isDiscovered =
+                    (file.unlocksEvidenceId &&
+                      state.evidence.find(
+                        (e) => e.id === file.unlocksEvidenceId
+                      )?.discovered) ||
+                    state.inspectedFiles.includes(file.path);
+
                   return (
                     <button
                       key={file.path}
@@ -179,17 +196,27 @@ export const VirtualDesktopModal: React.FC<VirtualDesktopModalProps> = ({
                       className={`w-full text-left p-3 rounded border transition flex items-start justify-between gap-2 cursor-pointer ${
                         isSelected
                           ? 'border-[#4FA3B8] bg-[#4FA3B8]/15 text-[#E3E7EB]'
+                          : !access.allowed
+                          ? 'border-white/5 bg-[#080B0E]/60 text-[#8E98A4]'
                           : isMothVault
                           ? 'border-[#C94B4B]/60 bg-[#C94B4B]/10 text-[#E3E7EB]'
                           : 'border-white/10 bg-[#12171D] hover:border-[#4FA3B8]/50 text-[#C2CAD3]'
                       }`}
                     >
                       <div className="flex items-start gap-2.5 min-w-0">
-                        <FileCode
-                          className={`w-4 h-4 mt-0.5 shrink-0 ${
-                            isMothVault ? 'text-[#C94B4B]' : 'text-[#4FA3B8]'
-                          }`}
-                        />
+                        {!access.allowed ? (
+                          <Lock className="w-4 h-4 mt-0.5 shrink-0 text-[#D89B3C]" />
+                        ) : (
+                          <FileCode
+                            className={`w-4 h-4 mt-0.5 shrink-0 ${
+                              isMothVault
+                                ? 'text-[#C94B4B]'
+                                : isDiscovered
+                                ? 'text-[#469A6C]'
+                                : 'text-[#4FA3B8]'
+                            }`}
+                          />
+                        )}
                         <div className="min-w-0">
                           <div className="text-xs font-mono font-semibold truncate">
                             {file.name}
@@ -201,10 +228,15 @@ export const VirtualDesktopModal: React.FC<VirtualDesktopModalProps> = ({
                       </div>
                       <div className="text-right font-mono text-[11px] text-[#8E98A4] shrink-0 tabular-nums">
                         <div>{file.size}</div>
-                        {file.unlocksEvidenceId && (
-                          <div className="text-[#469A6C]">
-                            {file.unlocksEvidenceId}
+                        {!access.allowed ? (
+                          <div className="text-[#D89B3C]">LOCKED</div>
+                        ) : isDiscovered ? (
+                          <div className="text-[#469A6C] flex items-center justify-end gap-1">
+                            <CheckCircle2 className="w-3 h-3" />
+                            <span>{file.unlocksEvidenceId || 'VERIFIED'}</span>
                           </div>
+                        ) : (
+                          <div className="text-[#4FA3B8]">UNINSPECTED</div>
                         )}
                       </div>
                     </button>
@@ -221,7 +253,8 @@ export const VirtualDesktopModal: React.FC<VirtualDesktopModalProps> = ({
                           {activeFile.path}
                         </div>
                         <div className="text-xs font-mono text-[#8E98A4] mt-0.5 tabular-nums">
-                          MODIFIED: {activeFile.modifiedAt} · SIZE: {activeFile.size}
+                          MODIFIED: {activeFile.modifiedAt} · SIZE:{' '}
+                          {activeFile.size}
                         </div>
                       </div>
                       <button
@@ -230,12 +263,30 @@ export const VirtualDesktopModal: React.FC<VirtualDesktopModalProps> = ({
                         onClick={() => onInspectFile(activeFile.path)}
                         className="px-3.5 py-1.5 rounded bg-[#4FA3B8] hover:bg-[#5eb3c8] text-[#080B0E] font-mono font-semibold text-xs uppercase cursor-pointer"
                       >
-                        LOG FORENSIC ARTIFACT
+                        {activeFileAccess.allowed
+                          ? 'LOG FORENSIC ARTIFACT'
+                          : 'VERIFY ACCESS PERMISSIONS'}
                       </button>
                     </div>
-                    <pre className="p-4 rounded border border-white/10 bg-[#0D131A] text-xs font-mono text-[#E3E7EB] whitespace-pre-wrap leading-relaxed">
-                      {activeFile.content}
-                    </pre>
+
+                    {activeFileAccess.allowed ? (
+                      <pre className="p-4 rounded border border-white/10 bg-[#0D131A] text-xs font-mono text-[#E3E7EB] whitespace-pre-wrap leading-relaxed">
+                        {activeFile.content}
+                      </pre>
+                    ) : (
+                      <div className="p-5 rounded border border-[#C94B4B]/50 bg-[#C94B4B]/10 text-xs font-mono text-[#E3E7EB] space-y-2">
+                        <div className="text-[#C94B4B] font-semibold uppercase flex items-center gap-2">
+                          <Lock className="w-4 h-4" />
+                          <span>ENCRYPTED VOLUME / ACCESS RESTRICTED</span>
+                        </div>
+                        <p className="text-[#C2CAD3]">
+                          {activeFileAccess.error}
+                        </p>
+                        <p className="text-[#8E98A4]">
+                          访问受限：必须先在 24 小时自助洗衣房与 Nadia Park 完成交谈并获取归档解密密钥（moth_archive.key），随后在深夜归来场景（03:12 AM）解锁此数据库。
+                        </p>
+                      </div>
+                    )}
                   </div>
                 ) : null}
               </div>
@@ -301,7 +352,7 @@ export const VirtualDesktopModal: React.FC<VirtualDesktopModalProps> = ({
                   data-testid="terminal-input"
                   value={cmdInput}
                   onChange={(e) => setCmdInput(e.target.value)}
-                  placeholder="Type ls, cat ntp_override.conf, cat access_0427.log, verify, or help..."
+                  placeholder="Type ls, cat ntp_override.conf, cat access_0427.log, verify, status, or help..."
                   className="flex-1 bg-transparent text-xs font-mono text-[#E3E7EB] focus:outline-none"
                 />
                 <button
@@ -380,6 +431,10 @@ export const VirtualDesktopModal: React.FC<VirtualDesktopModalProps> = ({
           <div className="flex items-center gap-4">
             <span>WORKING DIR: {state.currentDir}</span>
             <span>EVIDENCE LOGGED: {state.flags.evidence_count}/6</span>
+            <span>
+              ARCHIVE KEY:{' '}
+              {hasMothArchiveKey(state) ? 'MOUNTED' : 'MISSING'}
+            </span>
           </div>
           <div className="flex items-center gap-2 text-[#D89B3C]">
             <ShieldAlert className="w-3.5 h-3.5" />

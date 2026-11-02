@@ -129,18 +129,27 @@ export const DialogueOverlay: React.FC<DialogueOverlayProps> = ({
             </div>
             {currentNode.choices.map((choice, idx) => {
               const eventKey = `dialogue:${character.id}:${choice.id}`;
-              const wasSelected = state.completedEvents.includes(eventKey);
+              const nodeLockKey = `${character.id}:${currentNode.id}`;
+              const resolvedChoiceId = state.resolvedDialogueNodes[nodeLockKey];
+              const wasSelected =
+                state.completedEvents.includes(eventKey) ||
+                resolvedChoiceId === choice.id;
+              const isLockedOut =
+                Boolean(resolvedChoiceId) && resolvedChoiceId !== choice.id;
 
               return (
                 <button
                   key={choice.id}
                   type="button"
+                  disabled={isLockedOut}
                   data-testid={`dialogue-choice-${choice.id}`}
                   onClick={() => onSelectChoice(character.id, choice.id)}
-                  className={`w-full text-left p-3.5 rounded border transition cursor-pointer ${
+                  className={`w-full text-left p-3.5 rounded border transition ${
                     wasSelected
-                      ? 'border-[#4FA3B8] bg-[#4FA3B8]/15'
-                      : 'border-white/15 bg-[#12171D]/80 hover:border-[#4FA3B8] hover:bg-[#4FA3B8]/15'
+                      ? 'border-[#4FA3B8] bg-[#4FA3B8]/15 cursor-default'
+                      : isLockedOut
+                      ? 'border-white/5 bg-[#0A0E13] opacity-45 cursor-not-allowed'
+                      : 'border-white/15 bg-[#12171D]/80 hover:border-[#4FA3B8] hover:bg-[#4FA3B8]/15 cursor-pointer'
                   }`}
                 >
                   <div className="flex items-center justify-between gap-2">

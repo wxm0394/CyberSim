@@ -5,6 +5,7 @@ import {
   createInitialDeadAirState,
 } from '../data/storyData';
 import {
+  canAccessVirtualFile,
   canTransitionToScene,
   correlateEvidenceTimeline,
   executeDeadAirCommand,
@@ -13,7 +14,6 @@ import {
   inspectHotspot,
   inspectVirtualFile,
   openPhoneOverlay,
-  resolveChapterOneEnding,
   selectCharacterDialogueChoice,
   transitionToScene,
 } from './storyEngine';
@@ -30,6 +30,8 @@ describe('DEAD AIR V0.2 — Narrative Integrity & Consequence System', () => {
     assert.equal(state.flags.first_choice, null);
     assert.equal(state.flags.first_choice_locked, false);
     assert.equal(state.flags.contacted_moth, false);
+    assert.equal(state.flags.camera_tracking_risk, false);
+    assert.equal(state.flags.camera_tracked, false);
   });
 
   it('2. enforces one-time first phone choice and prevents repeated stat accumulation', () => {
@@ -125,7 +127,7 @@ describe('DEAD AIR V0.2 — Narrative Integrity & Consequence System', () => {
     assert.equal(canTransitionToScene(state, 'APARTMENT_RETURN').allowed, true);
   });
 
-  it('6. blocks reading lantern_auth_audit.db when moth_archive.key is missing', () => {
+  it('6. blocks reading lantern_auth_audit.db when moth_archive.key is missing OR when still in LAUNDROMAT before returning to APARTMENT_RETURN', () => {
     let state = createInitialDeadAirState('playing');
     state = inspectVirtualFile(
       state,
@@ -135,15 +137,61 @@ describe('DEAD AIR V0.2 — Narrative Integrity & Consequence System', () => {
     assert.equal(state.shellState, 'playing');
     assert.match(state.monologueBanner, /Permission denied/);
 
-    // Also via terminal command
+    // Progress to LAUNDROMAT and obtain moth_archive.key from Nadia
+    state = handleFirstPhoneChoice(state, 'WAIT_CHECK_PC');
+    state = inspectVirtualFile(
+      state,
+      '/home/eli/Downloads/incident_0427/ntp_override.conf'
+    );
+    state = inspectVirtualFile(
+      state,
+      '/home/eli/Downloads/incident_0427/access_0427.log'
+    );
+    state = correlateEvidenceTimeline(state);
+    state = transitionToScene(state, 'STREET_NIGHT');
+    state = transitionToScene(state, 'LAUNDROMAT');
+    state = selectCharacterDialogueChoice(state, 'nadia', 'nadia_c1_share');
+    state = selectCharacterDialogueChoice(state, 'nadia', 'nadia_c2_expose');
+    state = selectCharacterDialogueChoice(state, 'nadia', 'nadia_c3_accept');
+
+    assert.equal(hasMothArchiveKey(state), true);
+    assert.equal(state.currentScene, 'LAUNDROMAT');
+
+    // P0 #1 verification: Even with moth_archive.key acquired, reading lantern_auth_audit.db while still in LAUNDROMAT MUST fail!
+    const dbFileInLaundromat = state.files.find(
+      (f) => f.path === '/home/eli/archive_vault/lantern_auth_audit.db'
+    )!;
+    assert.equal(dbFileInLaundromat.unlocked, false);
+    assert.equal(
+      canAccessVirtualFile(state, dbFileInLaundromat).allowed,
+      false
+    );
+
     state = executeDeadAirCommand(
       state,
       'cat /home/eli/archive_vault/lantern_auth_audit.db'
     );
     assert.equal(state.flags.discovered_eli_account_reuse, false);
-    const lastLine = state.terminalHistory[state.terminalHistory.length - 1];
-    assert.equal(lastLine.tone, 'error');
-    assert.match(lastLine.text, /Permission denied/);
+    assert.equal(state.shellState, 'playing');
+    const lastLineInLaundromat =
+      state.terminalHistory[state.terminalHistory.length - 1];
+    assert.equal(lastLineInLaundromat.tone, 'error');
+    assert.match(lastLineInLaundromat.text, /Access restricted/);
+
+    // Only after returning to APARTMENT_RETURN can the final database be read
+    state = transitionToScene(state, 'APARTMENT_RETURN');
+    assert.equal(state.currentScene, 'APARTMENT_RETURN');
+    const dbFileInReturn = state.files.find(
+      (f) => f.path === '/home/eli/archive_vault/lantern_auth_audit.db'
+    )!;
+    assert.equal(canAccessVirtualFile(state, dbFileInReturn).allowed, true);
+
+    state = executeDeadAirCommand(
+      state,
+      'cat /home/eli/archive_vault/lantern_auth_audit.db'
+    );
+    assert.equal(state.flags.discovered_eli_account_reuse, true);
+    assert.equal(state.shellState, 'gameover');
   });
 
   it('7. rejects illegal scene jumps in normal mode and does not auto-set contacted_moth on room entry', () => {
@@ -242,10 +290,14 @@ describe('DEAD AIR V0.2 — Narrative Integrity & Consequence System', () => {
     assert.equal(state.flags.soc_warning_triggered, true);
   });
 
-  it('11. updates player_exposure accurately and triggers optical camera tracking on 4th Ave when >= 20%', () => {
+  it('11. separates camera_tracking_risk from camera_tracked until hs_camera is actually inspected on 4th Ave', () => {
     let state = createInitialDeadAirState('playing');
     state = handleFirstPhoneChoice(state, 'CALL_NADIA'); // exposure 10 + 15 = 25
     assert.equal(state.flags.player_exposure, 25);
+
+    // Improvement ② verification: exposure >= 20 sets camera_tracking_risk = true, but camera_tracked MUST remain false before inspecting hs_camera
+    assert.equal(state.flags.camera_tracking_risk, true);
+    assert.equal(state.flags.camera_tracked, false);
 
     state = inspectVirtualFile(
       state,
@@ -258,14 +310,19 @@ describe('DEAD AIR V0.2 — Narrative Integrity & Consequence System', () => {
     state = correlateEvidenceTimeline(state);
     state = transitionToScene(state, 'STREET_NIGHT');
 
-    // Inspecting Municipal Optical Pole #04 with exposure >= 20 increases corporate suspicion by +5
+    // Still false upon entering STREET_NIGHT prior to inspecting hs_camera
+    assert.equal(state.flags.camera_tracked, false);
+
+    // Inspecting Municipal Optical Pole #04 with exposure >= 20 locks camera_tracked = true and increases suspicion (+10) & exposure (+10)
     const beforeSuspicion = state.flags.corporate_suspicion;
+    const beforeExposure = state.flags.player_exposure;
     state = inspectHotspot(state, 'hs_camera');
-    assert.equal(state.flags.corporate_suspicion, beforeSuspicion + 5);
     assert.equal(state.flags.camera_tracked, true);
+    assert.equal(state.flags.corporate_suspicion, beforeSuspicion + 10);
+    assert.equal(state.flags.player_exposure, beforeExposure + 10);
   });
 
-  it('12. produces distinct narrative states based on player choices with Rhea and Nadia', () => {
+  it('12. enforces mutually exclusive dialogue choices per node (Rhea cannot be switched from cautious to share)', () => {
     const base = createInitialDeadAirState('playing');
 
     const pathAllied = selectCharacterDialogueChoice(
@@ -275,18 +332,35 @@ describe('DEAD AIR V0.2 — Narrative Integrity & Consequence System', () => {
     );
     assert.equal(pathAllied.flags.journalist_contact, true);
     assert.equal(pathAllied.flags.rhea_allied, true);
+    assert.equal(pathAllied.resolvedDialogueNodes['rhea:rhea_node_1'], 'rhea_c1_share');
 
-    const pathCautious = selectCharacterDialogueChoice(
+    // Improvement ① verification: Choosing rhea_c1_cautious locks rhea_node_1 and advances to rhea_node_2_cautious; trying to pick rhea_c1_share afterwards is rejected
+    let pathCautious = selectCharacterDialogueChoice(
       base,
       'rhea',
       'rhea_c1_cautious'
     );
     assert.equal(pathCautious.flags.journalist_contact, true);
     assert.equal(pathCautious.flags.rhea_allied, false);
+    assert.equal(
+      pathCautious.resolvedDialogueNodes['rhea:rhea_node_1'],
+      'rhea_c1_cautious'
+    );
+
+    const attemptedFlipToShare = selectCharacterDialogueChoice(
+      pathCautious,
+      'rhea',
+      'rhea_c1_share'
+    );
+    assert.equal(attemptedFlipToShare.flags.rhea_allied, false);
+    assert.equal(
+      attemptedFlipToShare.flags.player_exposure,
+      pathCautious.flags.player_exposure
+    );
   });
 
-  it('13. reaches all 3 distinct Chapter 1 Endings (Ending A, Ending B, Ending C) deterministically', () => {
-    // Path to ENDING A (THE SIGNAL LEAKS): full evidence, timeline correlated, Rhea allied, Nadia trust >= 55, low suspicion/exposure
+  it('13. reaches all 3 distinct Chapter 1 Endings (Ending A, Ending B, Ending C) via authentic, complete gameplay paths', () => {
+    // 13A: Authentic gameplay path to ENDING A (THE SIGNAL LEAKS)
     let stateA = createInitialDeadAirState('playing');
     stateA = handleFirstPhoneChoice(stateA, 'WAIT_CHECK_PC');
     stateA = inspectVirtualFile(
@@ -313,9 +387,10 @@ describe('DEAD AIR V0.2 — Narrative Integrity & Consequence System', () => {
       stateA,
       '/home/eli/archive_vault/lantern_auth_audit.db'
     );
+    assert.equal(stateA.shellState, 'gameover');
     assert.equal(stateA.endingId, 'ENDING_A_SIGNAL_LEAKS');
 
-    // Path to ENDING B (A DIRTY BARGAIN): full evidence & timeline correlated, low exposure, but did NOT ally with Rhea or alienated Nadia
+    // 13B: Authentic gameplay path to ENDING B (A DIRTY BARGAIN)
     let stateB = createInitialDeadAirState('playing');
     stateB = handleFirstPhoneChoice(stateB, 'WAIT_CHECK_PC');
     stateB = inspectVirtualFile(
@@ -328,7 +403,7 @@ describe('DEAD AIR V0.2 — Narrative Integrity & Consequence System', () => {
     );
     stateB = correlateEvidenceTimeline(stateB);
     stateB = transitionToScene(stateB, 'STREET_NIGHT');
-    // Skip Rhea Solis -> journalist_contact remains false
+    stateB = selectCharacterDialogueChoice(stateB, 'rhea', 'rhea_c1_cautious');
     stateB = transitionToScene(stateB, 'LAUNDROMAT');
     stateB = selectCharacterDialogueChoice(stateB, 'nadia', 'nadia_c1_question');
     stateB = selectCharacterDialogueChoice(stateB, 'nadia', 'nadia_c2_withhold');
@@ -338,21 +413,76 @@ describe('DEAD AIR V0.2 — Narrative Integrity & Consequence System', () => {
       stateB,
       '/home/eli/archive_vault/lantern_auth_audit.db'
     );
+    assert.equal(stateB.shellState, 'gameover');
     assert.equal(stateB.endingId, 'ENDING_B_DIRTY_BARGAIN');
 
-    // Path to ENDING C (THE FALL GUY): high corporate suspicion (>= 45) or high exposure
+    // 13C: Authentic, complete gameplay path to ENDING C (THE FALL GUY) without any manual flag mutation
     let stateC = createInitialDeadAirState('playing');
-    stateC = {
-      ...stateC,
-      flags: {
-        ...stateC.flags,
-        corporate_suspicion: 55,
-      },
-    };
-    assert.equal(resolveChapterOneEnding(stateC), 'ENDING_C_FALL_GUY');
+    // Step 1: Call Nadia on unencrypted cellular line (+15 suspicion -> 30, +15 exposure -> 25)
+    stateC = handleFirstPhoneChoice(stateC, 'CALL_NADIA');
+    assert.equal(stateC.flags.corporate_suspicion, 30);
+    assert.equal(stateC.flags.player_exposure, 25);
+
+    // Step 2: Inspect forensic files and correlate timeline, plus run reckless active subnet probe on Enclave gateway 10.88.14.9 (+15 suspicion -> 45, +15 exposure -> 40)
+    stateC = executeDeadAirCommand(stateC, 'cat ntp_override.conf');
+    stateC = executeDeadAirCommand(stateC, 'cat access_0427.log');
+    stateC = executeDeadAirCommand(stateC, 'probe 10.88.14.9');
+    assert.equal(stateC.flags.corporate_suspicion, 45);
+    assert.equal(stateC.flags.player_exposure, 40);
+    stateC = executeDeadAirCommand(stateC, 'verify');
+
+    // Step 3: Step out to 4th Ave and get spotted by Municipal Optical Pole #04 (+10 suspicion -> 55, +10 exposure -> 50)
+    stateC = transitionToScene(stateC, 'STREET_NIGHT');
+    stateC = inspectHotspot(stateC, 'hs_camera');
+    assert.equal(stateC.flags.camera_tracked, true);
+    assert.equal(stateC.flags.corporate_suspicion, 55);
+    assert.equal(stateC.flags.player_exposure, 50);
+
+    // Step 4: Interrogate Nadia aggressively in Laundromat (+5 and +10 suspicion -> 70, +5 exposure -> 55)
+    stateC = transitionToScene(stateC, 'LAUNDROMAT');
+    stateC = selectCharacterDialogueChoice(stateC, 'nadia', 'nadia_c1_question');
+    stateC = selectCharacterDialogueChoice(stateC, 'nadia', 'nadia_c2_press');
+    stateC = selectCharacterDialogueChoice(stateC, 'nadia', 'nadia_c3_accept');
+
+    // Step 5: Return to Apartment 4B and unlock final database -> triggers ENDING_C_FALL_GUY naturally
+    stateC = transitionToScene(stateC, 'APARTMENT_RETURN');
+    stateC = executeDeadAirCommand(
+      stateC,
+      'cat /home/eli/archive_vault/lantern_auth_audit.db'
+    );
+    assert.equal(stateC.shellState, 'gameover');
+    assert.equal(stateC.endingId, 'ENDING_C_FALL_GUY');
   });
 
-  it('14. migrates legacy v1 saves and safely falls back on corrupted save data', () => {
+  it('14. migrates legacy v1 saves, preserves inspected hotspots and resolvedDialogueNodes, and safely falls back on corrupted save data', () => {
+    let activeState = createInitialDeadAirState('playing');
+    activeState = inspectHotspot(activeState, 'hs_window');
+    activeState = selectCharacterDialogueChoice(
+      activeState,
+      'rhea',
+      'rhea_c1_cautious'
+    );
+    assert.equal(
+      activeState.hotspots.APARTMENT_NIGHT.find((h) => h.id === 'hs_window')
+        ?.inspected,
+      true
+    );
+
+    // Improvement ③ verification: migrateDeadAirSave preserves hotspot inspected state and resolvedDialogueNodes
+    const roundTripped = migrateDeadAirSave(
+      JSON.parse(JSON.stringify(activeState)),
+      true
+    );
+    assert.equal(
+      roundTripped.hotspots.APARTMENT_NIGHT.find((h) => h.id === 'hs_window')
+        ?.inspected,
+      true
+    );
+    assert.equal(
+      roundTripped.resolvedDialogueNodes['rhea:rhea_node_1'],
+      'rhea_c1_cautious'
+    );
+
     const legacyV1Save = {
       shellState: 'playing',
       currentScene: 'STREET_NIGHT',
@@ -369,7 +499,7 @@ describe('DEAD AIR V0.2 — Narrative Integrity & Consequence System', () => {
         discovered_lantern: true,
         corporate_suspicion: 20,
         journalist_contact: true,
-        player_exposure: 15,
+        player_exposure: 22,
         discovered_eli_account_reuse: false,
         current_objective: 'Cross 4th Ave',
       },
@@ -389,6 +519,8 @@ describe('DEAD AIR V0.2 — Narrative Integrity & Consequence System', () => {
     assert.equal(migrated.flags.first_choice_locked, true);
     assert.equal(migrated.flags.trust_nadia, 62);
     assert.equal(migrated.flags.evidence_count, 2);
+    assert.equal(migrated.flags.camera_tracking_risk, true);
+    assert.equal(migrated.flags.camera_tracked, false);
 
     // Corrupted input falls back cleanly
     const fallback = migrateDeadAirSave('invalid-json-object', false);
@@ -405,6 +537,7 @@ describe('DEAD AIR V0.2 — Narrative Integrity & Consequence System', () => {
     assert.equal(fresh.flags.first_choice, null);
     assert.equal(fresh.flags.first_choice_locked, false);
     assert.equal(fresh.completedEvents.length, 0);
+    assert.equal(Object.keys(fresh.resolvedDialogueNodes).length, 0);
     assert.equal(fresh.endingId, null);
   });
 
@@ -431,7 +564,7 @@ describe('DEAD AIR V0.2 — Narrative Integrity & Consequence System', () => {
     assert.equal(state.flags.player_exposure, exposureAfterFirst);
   });
 
-  it('17. validates terminal commands against game state (ls, cd, stat, grep, verify)', () => {
+  it('17. validates terminal commands against game state (ls, cd, stat, grep, verify, probe)', () => {
     let state = createInitialDeadAirState('playing');
 
     // Running verify with 0 discovered evidence outputs Timeline mismatch

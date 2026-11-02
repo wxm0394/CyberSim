@@ -45,6 +45,8 @@ function unlockEvidenceById(
 function syncCharactersAndFlags(state: DeadAirState): DeadAirState {
   const discoveredCount = state.evidence.filter((e) => e.discovered).length;
   const nadiaTrust = clampMetric(state.flags.trust_nadia);
+  const suspicion = clampMetric(state.flags.corporate_suspicion);
+  const exposure = clampMetric(state.flags.player_exposure);
 
   const nadiaStance =
     nadiaTrust >= 65
@@ -79,9 +81,8 @@ function syncCharactersAndFlags(state: DeadAirState): DeadAirState {
   });
 
   const socWarningTriggered =
-    state.flags.soc_warning_triggered || state.flags.corporate_suspicion >= 25;
-  const cameraTracked =
-    state.flags.camera_tracked || state.flags.player_exposure >= 20;
+    state.flags.soc_warning_triggered || suspicion >= 25;
+  const cameraTrackingRisk = exposure >= 20;
 
   return {
     ...state,
@@ -89,11 +90,12 @@ function syncCharactersAndFlags(state: DeadAirState): DeadAirState {
     flags: {
       ...state.flags,
       trust_nadia: nadiaTrust,
-      corporate_suspicion: clampMetric(state.flags.corporate_suspicion),
-      player_exposure: clampMetric(state.flags.player_exposure),
+      corporate_suspicion: suspicion,
+      player_exposure: exposure,
       evidence_count: discoveredCount,
       soc_warning_triggered: socWarningTriggered,
-      camera_tracked: cameraTracked,
+      camera_tracking_risk: cameraTrackingRisk,
+      camera_tracked: Boolean(state.flags.camera_tracked),
     },
   };
 }
@@ -115,24 +117,33 @@ export function canAccessVirtualFile(
   state: DeadAirState,
   file: VirtualFileEntry
 ): { allowed: boolean; error: string } {
-  if (file.path === '/home/eli/archive_vault/lantern_auth_audit.db') {
-    if (!hasMothArchiveKey(state) && !state.debugMode) {
+  // 1. Always enforce requiresKeyId if present
+  if (file.requiresKeyId) {
+    const hasRequiredKey = Boolean(
+      state.inventory.find((i) => i.id === file.requiresKeyId)?.acquired
+    );
+    if (!hasRequiredKey && !state.debugMode) {
       return {
         allowed: false,
         error:
           'Permission denied: Encrypted LUKS/SQLite volume. Missing hardware decryption key (moth_archive.key).',
       };
     }
-    if (state.currentScene !== 'APARTMENT_RETURN' && !file.unlocked && !state.debugMode) {
-      return {
-        allowed: false,
-        error:
-          'Access restricted: Remote archive vault mount (/home/eli/archive_vault) is offline until you return to Apt 4B.',
-      };
-    }
-    return { allowed: true, error: '' };
   }
 
+  // 2. Unconditionally enforce requiresScene regardless of file.unlocked
+  if (
+    file.requiresScene &&
+    state.currentScene !== file.requiresScene &&
+    !state.debugMode
+  ) {
+    return {
+      allowed: false,
+      error: `Access restricted: Remote archive vault mount (${file.path}) is offline. You must return to Apartment 4B (${file.requiresScene}) to access this volume.`,
+    };
+  }
+
+  // 3. Enforce general unlocked flag
   if (!file.unlocked && !state.debugMode) {
     return {
       allowed: false,
@@ -164,7 +175,6 @@ export function canTransitionToScene(
     };
   }
 
-  // Prerequisites to leave Apartment Night -> Street Night
   const hasPhoneChoice =
     state.flags.first_choice_locked && state.flags.first_choice !== null;
   const initialForensicCount = getInitialIncidentEvidenceCount(state);
@@ -265,7 +275,7 @@ export function resolveChapterOneEnding(
     player_exposure,
   } = state.flags;
 
-  // Ending C: High suspicion/exposure OR insufficient evidence/timeline
+  // Ending C: High suspicion (>= 45) OR high exposure (>= 45) OR incomplete forensics
   if (
     corporate_suspicion >= 45 ||
     player_exposure >= 45 ||
@@ -322,7 +332,6 @@ export function inspectHotspot(
   const target = currentHotspots.find((h) => h.id === hotspotId);
   if (!target) return state;
 
-  // If hotspot triggers a scene transition, validate state machine first!
   if (target.triggersScene) {
     const check = canTransitionToScene(state, target.triggersScene);
     if (!check.allowed && !state.debugMode) {
@@ -376,7 +385,7 @@ export function inspectHotspot(
     };
   }
 
-  // Street camera consequence: if player_exposure >= 20, inspecting camera logs gait tracking warning
+  // Street camera consequence: if player_exposure >= 20 (camera_tracking_risk), inspecting camera triggers active optical lock!
   if (hotspotId === 'hs_camera' && isFirstInspection) {
     if (nextState.flags.player_exposure >= 20) {
       nextState = {
@@ -384,14 +393,15 @@ export function inspectHotspot(
         flags: {
           ...nextState.flags,
           corporate_suspicion: clampMetric(
-            nextState.flags.corporate_suspicion + 5
+            nextState.flags.corporate_suspicion + 10
           ),
+          player_exposure: clampMetric(nextState.flags.player_exposure + 10),
           camera_tracked: true,
         },
         lastFeedbackBanner:
-          'WARNING: High cellular exposure allowed Municipal Pole #04 to cross-match your gait signature (+5% Corporate Suspicion).',
+          'WARNING: High cellular exposure allowed Municipal Pole #04 to lock onto your gait & IMEI (+10% Corporate Suspicion, +10% Exposure).',
         monologueBanner:
-          'Municipal Pole #04 locked onto your coat silhouette—your earlier cellular activity tipped off Vespera’s street grid (+5% Corporate Suspicion).',
+          'Municipal Pole #04 locked onto your silhouette—your earlier cellular trace allowed Vespera’s street grid to flag your location (+10% Corporate Suspicion, +10% Exposure).',
       };
     }
   }
@@ -471,7 +481,6 @@ export function transitionToScene(
       'Greyhaven, 02:17 AM. Rain streaks the glass outside Apt 4B. Your phone is vibrating on the desk.';
   }
 
-  // In APARTMENT_RETURN, MOTH's message arrives on the phone, but contacted_moth is NOT set until the player reads it or talks to MOTH!
   const updatedMessages =
     targetScene === 'APARTMENT_RETURN'
       ? state.phoneMessages.map((m) =>
@@ -479,18 +488,17 @@ export function transitionToScene(
         )
       : state.phoneMessages;
 
-  // Unlock lantern_auth_audit.db ONLY if the player has moth_archive.key (or in debug mode)
+  // Unlock lantern_auth_audit.db ONLY when entering APARTMENT_RETURN with moth_archive.key
   const canUnlockVault =
     targetScene === 'APARTMENT_RETURN' &&
     (hasMothArchiveKey(state) || isDebugJump);
 
-  const updatedFiles = canUnlockVault
-    ? state.files.map((f) =>
-        f.path === '/home/eli/archive_vault/lantern_auth_audit.db'
-          ? { ...f, unlocked: true }
-          : f
-      )
-    : state.files;
+  const updatedFiles = state.files.map((f) => {
+    if (f.path === '/home/eli/archive_vault/lantern_auth_audit.db') {
+      return { ...f, unlocked: canUnlockVault };
+    }
+    return f;
+  });
 
   const nextUnlockedScenes = state.unlockedScenes.includes(targetScene)
     ? state.unlockedScenes
@@ -522,7 +530,6 @@ export function handleFirstPhoneChoice(
 ): DeadAirState {
   if (!choice) return state;
 
-  // Enforce strict one-time choice!
   if (
     state.flags.first_choice_locked ||
     state.flags.first_choice !== null ||
@@ -632,16 +639,48 @@ export function inspectVirtualFile(
 
   const access = canAccessVirtualFile(state, file);
   if (!access.allowed) {
-    return {
+    // High-risk consequence: attempting to force-read the encrypted archive vault without moth_archive.key trips a LUKS tamper alert once
+    const tamperKey = 'event:unauthorized_vault_attempt';
+    const isVaultWithoutKey =
+      file.path === '/home/eli/archive_vault/lantern_auth_audit.db' &&
+      !hasMothArchiveKey(state);
+    const shouldPenalizeTamper =
+      isVaultWithoutKey && !state.completedEvents.includes(tamperKey);
+
+    const tamperLines: TerminalOutputLine[] = [
+      makeTermLine(`eli@greyos:${state.currentDir}$ cat ${file.path}`, 'command'),
+      makeTermLine(access.error, 'error'),
+    ];
+
+    if (shouldPenalizeTamper) {
+      tamperLines.push(
+        makeTermLine(
+          '[SECURITY ALERT] Unauthenticated LUKS header read triggered remote watchdog beacon (+10% Corporate Suspicion, +5% Exposure).',
+          'error'
+        )
+      );
+    }
+
+    const penalizedState: DeadAirState = {
       ...state,
-      terminalHistory: [
-        ...state.terminalHistory,
-        makeTermLine(`eli@greyos:${state.currentDir}$ cat ${file.path}`, 'command'),
-        makeTermLine(access.error, 'error'),
-      ],
+      completedEvents: shouldPenalizeTamper
+        ? [...state.completedEvents, tamperKey]
+        : state.completedEvents,
+      flags: shouldPenalizeTamper
+        ? {
+            ...state.flags,
+            corporate_suspicion: clampMetric(
+              state.flags.corporate_suspicion + 10
+            ),
+            player_exposure: clampMetric(state.flags.player_exposure + 5),
+          }
+        : state.flags,
+      terminalHistory: [...state.terminalHistory, ...tamperLines],
       lastFeedbackBanner: access.error,
       monologueBanner: access.error,
     };
+
+    return syncCharactersAndFlags(penalizedState);
   }
 
   let nextEvidence = state.evidence;
@@ -837,8 +876,23 @@ export function selectCharacterDialogueChoice(
   const choice = currentNode.choices.find((c) => c.id === choiceId);
   if (!choice) return state;
 
+  // Enforce one-time decision per NPC dialogue node (`resolvedDialogueNodes`)
+  const nodeKey = `${characterId}:${currentNode.id}`;
+  const previouslyChosenId = state.resolvedDialogueNodes[nodeKey];
+  if (previouslyChosenId && previouslyChosenId !== choiceId) {
+    return {
+      ...state,
+      lastFeedbackBanner:
+        'Decision Locked: You have already committed to a choice for this conversation stage.',
+      monologueBanner:
+        'Decision Locked: You cannot reverse your stance on this dialogue stage.',
+    };
+  }
+
   const choiceEventKey = `dialogue:${characterId}:${choiceId}`;
-  const alreadyChosen = state.completedEvents.includes(choiceEventKey);
+  const alreadyChosen =
+    Boolean(previouslyChosenId) ||
+    state.completedEvents.includes(choiceEventKey);
 
   const trustDelta = alreadyChosen ? 0 : choice.trustDelta || 0;
   const suspicionDelta = alreadyChosen ? 0 : choice.suspicionDelta || 0;
@@ -860,7 +914,6 @@ export function selectCharacterDialogueChoice(
     nextEvidence = res.updated;
   }
 
-  let nextFiles = state.files;
   let nextInventory = state.inventory;
   let laundromatDone = state.flags.laundromat_meeting_done;
   let contactedMoth = state.flags.contacted_moth;
@@ -869,15 +922,16 @@ export function selectCharacterDialogueChoice(
   let rheaAllied = state.flags.rhea_allied;
   let feedbackBanner = `Dialogue recorded with ${char.name}.`;
 
-  if (characterId === 'rhea') {
+  if (characterId === 'rhea' && currentNode.id === 'rhea_node_1' && !alreadyChosen) {
     journalistContact = true;
     if (choiceId === 'rhea_c1_share') {
       rheaAllied = true;
       feedbackBanner =
         'Media Dead-Drop Active: Rhea Solis configured an air-gapped upload channel for your final evidence dump.';
     } else {
+      rheaAllied = false;
       feedbackBanner =
-        'Rhea Solis noted your caution—no automatic media dead-drop configured yet.';
+        'Rhea Solis noted your caution—no automatic media dead-drop configured for tonight.';
     }
   }
 
@@ -901,23 +955,18 @@ export function selectCharacterDialogueChoice(
     laundromatDone = true;
     const ev5 = unlockEvidenceById(nextEvidence, 'EV-05');
     nextEvidence = ev5.updated;
+    // IMPORTANT: Grant moth_archive.key, but do NOT unlock lantern_auth_audit.db while still in LAUNDROMAT!
     nextInventory = nextInventory.map((item) =>
       item.id === 'item_moth_usb' ? { ...item, acquired: true } : item
     );
-    nextFiles = nextFiles.map((f) =>
-      f.path === '/home/eli/archive_vault/lantern_auth_audit.db'
-        ? { ...f, unlocked: true }
-        : f
-    );
 
-    // Consequence of high Nadia Trust (>= 65): she provides extra counter-surveillance routing intel that reduces exposure!
     if (nextNadiaTrust >= 65 && !alreadyChosen) {
       nextExposure = clampMetric(nextExposure - 5);
       feedbackBanner =
         'High Trust Bonus (Nadia >= 65%): Nadia handed you moth_archive.key AND shared Vespera’s fiber tap filter (-5% Player Exposure).';
       extraTerminalLines.push(
         makeTermLine(
-          '[ALLY INTEL — NADIA PARK] Applied Enclave MAC-spoof filter to local interface (-5% Exposure). Key moth_archive.key mounted.',
+          '[ALLY INTEL — NADIA PARK] Applied Enclave MAC-spoof filter to local interface (-5% Exposure). Key moth_archive.key acquired.',
           'highlight'
         )
       );
@@ -940,13 +989,18 @@ export function selectCharacterDialogueChoice(
     ? state.completedEvents
     : [...state.completedEvents, choiceEventKey];
 
+  const nextResolvedNodes = {
+    ...state.resolvedDialogueNodes,
+    [nodeKey]: previouslyChosenId || choiceId,
+  };
+
   const nextState: DeadAirState = {
     ...state,
     characters: updatedCharacters,
     evidence: nextEvidence,
-    files: nextFiles,
     inventory: nextInventory,
     completedEvents: nextCompletedEvents,
+    resolvedDialogueNodes: nextResolvedNodes,
     terminalHistory: [...state.terminalHistory, ...extraTerminalLines],
     activeOverlay: choice.nextNodeId ? 'DIALOGUE' : 'NONE',
     flags: {
@@ -1010,6 +1064,7 @@ export function executeDeadAirCommand(
             '  grep <pattern> <file>    Search file lines matching pattern',
             '  unzip incident_0427.zip  Verify and unpack archive contents',
             '  verify / timeline        Correlate discovered evidence chronologically (requires >= 2 artifacts)',
+            '  probe <target_ip>        Active subnet reconnaissance (WARNING: high IDS trace risk)',
             '  status                   Show Eli Ward exposure, suspicion & chapter prerequisites',
             '  whoami                   Show current operator identity',
             '  clear                    Clear terminal scrollback',
@@ -1018,6 +1073,52 @@ export function executeDeadAirCommand(
         ),
       ],
     };
+  }
+
+  // High-risk active network probe command (allows reckless hackers to trigger IDS honey-trap)
+  if (cmd === 'probe' || cmd === 'ping' || cmd === 'scan') {
+    const targetIp = arg || '10.88.14.9';
+    const probeKey = `event:active_probe:${targetIp}`;
+    const isFirstProbe = !state.completedEvents.includes(probeKey);
+    const nextSuspicion = isFirstProbe
+      ? clampMetric(state.flags.corporate_suspicion + 15)
+      : state.flags.corporate_suspicion;
+    const nextExposure = isFirstProbe
+      ? clampMetric(state.flags.player_exposure + 15)
+      : state.flags.player_exposure;
+
+    const probedState: DeadAirState = {
+      ...state,
+      completedEvents: isFirstProbe
+        ? [...state.completedEvents, probeKey]
+        : state.completedEvents,
+      flags: {
+        ...state.flags,
+        corporate_suspicion: nextSuspicion,
+        player_exposure: nextExposure,
+      },
+      terminalHistory: [
+        ...state.terminalHistory,
+        cmdLine,
+        makeTermLine(
+          [
+            `PROBING ${targetIp} (Vespera Executive Enclave VLAN)...`,
+            '  PORT 443/tcp  OPEN   vespera-enclave-gw (TLS 1.3)',
+            '  PORT 8443/tcp OPEN   lantern-sync-controller',
+            isFirstProbe
+              ? '[IDS HONEY-TRAP TRIGGERED] Unmasked SYN probe logged by Director Marcus Hale’s SOC (+15% Corporate Suspicion, +15% Player Exposure)!'
+              : '[IDS WARNING] Subnet canary remains on high alert.',
+          ].join('\n'),
+          'error'
+        ),
+      ],
+      monologueBanner:
+        'Your active probe against Vespera’s 10.88.14.9 Enclave subnet tripped a canary firewall (+15% Corporate Suspicion, +15% Exposure).',
+      lastFeedbackBanner:
+        'IDS Honey-Trap Tripped: +15% Corporate Suspicion, +15% Player Exposure',
+    };
+
+    return syncCharactersAndFlags(probedState);
   }
 
   if (cmd === 'whoami') {
@@ -1050,7 +1151,11 @@ export function executeDeadAirCommand(
               state.flags.corporate_suspicion >= 25 ? '[SOC ALERT ACTIVE]' : '[NOMINAL]'
             }`,
             `Player Exposure     : ${state.flags.player_exposure}% ${
-              state.flags.player_exposure >= 20 ? '[OPTICAL TRACKING RISK]' : '[LOW]'
+              state.flags.camera_tracked
+                ? '[CAMERA LOCKED]'
+                : state.flags.camera_tracking_risk
+                ? '[OPTICAL TRACKING RISK]'
+                : '[LOW]'
             }`,
             `Evidence Logged     : ${state.flags.evidence_count} / 6`,
             `Timeline Correlated : ${state.flags.timeline_correlated ? 'YES' : 'NO (Run verify)'}`,
@@ -1108,7 +1213,7 @@ export function executeDeadAirCommand(
           ? state.evidence.find((e) => e.id === f.unlocksEvidenceId)?.discovered
           : state.inspectedFiles.includes(f.path);
         const tag = !access.allowed
-          ? '[LOCKED - KEY REQUIRED]'
+          ? '[LOCKED - KEY/SCENE REQUIRED]'
           : isDiscovered
           ? `[VERIFIED ${f.unlocksEvidenceId || ''}]`
           : '[UNINSPECTED]';

@@ -36,7 +36,8 @@ export const CHAPTER_ONE_ENDINGS: Record<
         name: 'Eli Ward (e.ward_09)',
         status:
           'Underground in Port District with Daniel Cross; cleared by cryptographic timestamp proof.',
-        statusZh: '在导师 Daniel Cross 协助下转入港区安全屋，时间戳铁证洗刷了替罪羊指控。',
+        statusZh:
+          '在导师 Daniel Cross 协助下转入港区安全屋，时间戳铁证洗刷了替罪羊指控。',
       },
       {
         name: 'Nadia Park',
@@ -48,7 +49,8 @@ export const CHAPTER_ONE_ENDINGS: Record<
         name: 'Rhea Solis',
         status:
           'Published the Pulitzer-shortlisted "Project LANTERN" investigative series.',
-        statusZh: '刊发《灰港纪事报》头版调查特稿，迫使市政厅冻结与 Vespera 的数据合约。',
+        statusZh:
+          '刊发《灰港纪事报》头版调查特稿，迫使市政厅冻结与 Vespera 的数据合约。',
       },
       {
         name: 'Marcus Hale',
@@ -79,7 +81,8 @@ export const CHAPTER_ONE_ENDINGS: Record<
         name: 'Eli Ward (e.ward_09)',
         status:
           'Extracted via MOTH’s darknet relay network; holding the LANTERN vault as leverage.',
-        statusZh: '经由 MOTH 的地下暗网通道撤离公寓，将“灯塔”账本作为保命筹码。',
+        statusZh:
+          '经由 MOTH 的地下暗网通道撤离公寓，将“灯塔”账本作为保命筹码。',
       },
       {
         name: 'Nadia Park',
@@ -111,12 +114,12 @@ export const CHAPTER_ONE_ENDINGS: Record<
     title: 'THE FALL GUY',
     titleZh: '替罪之羊 · 完美栽赃',
     subtitle:
-      'High Exposure or Incomplete Forensics Allowed Vespera to Frame e.ward_09',
-    subtitleZh: '过高的暴露风险或残缺的证据链，让你彻底沦为企业阴谋的替罪羊',
+      'High Exposure or Corporate Suspicion Allowed Vespera to Frame e.ward_09',
+    subtitleZh: '过高的暴露度或企业怀疑值，让你彻底沦为企业阴谋的替罪羊',
     epilogue:
-      'As "WE KNOW WHO YOU ARE" burns into your monitor, heavy boots echo up the tenement stairwell outside Apartment 4B. Triggered by high cellular/network exposure or an uncorroborated forensic chain, Director Marcus Hale’s containment unit locks down your building before you can transmit a single verified packet. By morning commute, Greyhaven cable news broadcasts your old employee photo: former support engineer Eli Ward (e.ward_09) is officially indicted for the unauthorized October 29 data sabotage, while Project LANTERN continues operating in total secrecy.',
+      'As "WE KNOW WHO YOU ARE" burns into your monitor, heavy boots echo up the tenement stairwell outside Apartment 4B. Triggered by high cellular/network exposure, aggressive Enclave probing, or corporate security alerts, Director Marcus Hale’s containment unit locks down your building before you can transmit a single verified packet. By morning commute, Greyhaven cable news broadcasts your old employee photo: former support engineer Eli Ward (e.ward_09) is officially indicted for the unauthorized October 29 data sabotage, while Project LANTERN continues operating in total secrecy.',
     epilogueZh:
-      '当“WE KNOW WHO YOU ARE.”在屏幕上亮起时，4B 公寓门外的老旧楼梯间已响起密集的战术靴声。由于行动暴露度/企业怀疑值过高或未能建立完整的取证时间线，安全总监 Marcus Hale 的封锁小队在你发出任何有效证据前彻底接管了现场。次日早高峰，灰港市各大新闻频道循环播放着你的旧工牌照片：前支持工程师 Eli Ward（e.ward_09）被正式指控为数据破坏案的唯一黑客，而“灯塔计划”依旧在阴影中主宰着整座城市。',
+      '当“WE KNOW WHO YOU ARE.”在屏幕上亮起时，4B 公寓门外的老旧楼梯间已响起密集的战术靴声。由于高风险的网络探测、街头监控锁定或企业怀疑值过高，安全总监 Marcus Hale 的封锁小队在你发出任何有效证据前彻底接管了现场。次日早高峰，灰港市各大新闻频道循环播放着你的旧工牌照片：前支持工程师 Eli Ward（e.ward_09）被正式指控为数据破坏案的唯一黑客，而“灯塔计划”依旧在阴影中主宰着整座城市。',
     characterFates: [
       {
         name: 'Eli Ward (e.ward_09)',
@@ -509,7 +512,8 @@ ORIGIN_SUBNET=10.88.14.9 (Vespera Executive Enclave VLAN)
 MFA_STATUS=BYPASSED_ROOT_KEYRING
 PRIVILEGE_ESCALATION=uid=0(root) gid=0(root)
 PAYLOAD_EXFIL=14.2 GB -> /vault/lantern_civic_master.enc
-# FORENSIC ARTIFACT [EV-03]: Shadow account escalated to root during the 14-minute blackout.`,
+# FORENSIC ARTIFACT [EV-03]: Shadow account escalated to root during the 14-minute blackout.
+# WARNING: Active probing of 10.88.14.9 ('probe 10.88.14.9') without airgap masking will trip Vespera SOC IDS.`,
   },
   {
     name: 'lantern_schema_brief.txt',
@@ -593,12 +597,13 @@ I know Vespera fired you when you asked about their municipal data bridge. I'm u
   {
     id: 'mail_3',
     sender: 'Daniel Cross <dcross@null-sector.io>',
-    subject: 'Forensic Timeline Verification Script Installed',
-    subjectZh: '已为你配置日志时间线取证校验脚本',
+    subject: 'Forensic Timeline Verification Script & IDS Warning',
+    subjectZh: '已为你配置日志时间线取证校验脚本（附内网探测警告）',
     timestamp: 'Oct 30, 2028',
     body: `Hey Eli,
 Heard you were investigating NTP clock rollbacks on Linux gateways. I added the 'verify' and 'timeline' correlation commands to your GreyOS shell.
-Once you inspect at least two forensic files with 'cat <file>', run 'verify' in the terminal or click 'Correlate Evidence' in the Timeline tab to reconstruct the exact chronology.`,
+Once you inspect at least two forensic files with 'cat <file>', run 'verify' in the terminal or click 'Correlate Evidence' in the Timeline tab to reconstruct the exact chronology.
+One warning: DO NOT run 'probe 10.88.14.9' against Vespera's Executive Enclave subnet from your home fiber unless you want Marcus Hale's IDS honey-trap locking onto your apartment.`,
   },
 ];
 
@@ -700,11 +705,13 @@ export const INITIAL_CHARACTERS: CharacterProfile[] = [
           {
             id: 'nadia_c2_press',
             label:
-              '[Press Her] “Your own analyst ID is on the early LANTERN schema, isn’t it?”',
+              '[Press Her Aggressively] “Your own analyst ID is on the early LANTERN schema, isn’t it?”',
             labelZh:
-              '【质问她】“你自己的分析师工号也签在早期的‘灯塔’架构上，对吧？”',
+              '【严厉质问她】“你自己的分析师工号也签在早期的‘灯塔’架构上，对吧？”',
             nextNodeId: 'nadia_node_3',
             trustDelta: -15,
+            suspicionDelta: 10,
+            exposureDelta: 5,
             unlocksEvidenceId: 'EV-05',
           },
           {
@@ -787,6 +794,7 @@ export const INITIAL_CHARACTERS: CharacterProfile[] = [
               '“I have forensic logs from a covert system called Project LANTERN. Open an encrypted dead-drop—if I go dark, publish everything.”',
             labelZh:
               '“我手里有‘灯塔计划’（Project LANTERN）的底层取证日志。开启加密死信通道——如果我失联，立即全城发稿。”',
+            nextNodeId: 'rhea_node_2_allied',
             trustDelta: 20,
             exposureDelta: 5,
           },
@@ -795,7 +803,36 @@ export const INITIAL_CHARACTERS: CharacterProfile[] = [
             label:
               '“Just grabbing air, Rhea. Keep your head down tonight—I can’t share anything yet.”',
             labelZh: '“只是出来透透气，Rhea。今晚千万小心，我现在还不能透露任何事。”',
+            nextNodeId: 'rhea_node_2_cautious',
             trustDelta: -5,
+          },
+        ],
+      },
+      {
+        id: 'rhea_node_2_allied',
+        speaker: 'Rhea Solis',
+        body: 'Project LANTERN... I knew Vespera was running a shadow scoring engine. My air-gapped dead-drop relay is live now. Once you decrypt the final audit vault in your apartment, the packet will mirror straight to my press server.',
+        bodyZh:
+          '“灯塔计划”……我就知道 Vespera 在暗中运行一套影子评分系统。我的物理隔离死信通道已经就绪，只要你在公寓里解密最终审计库，证据就会自动同步到报社服务器。',
+        choices: [
+          {
+            id: 'rhea_c2_allied_done',
+            label: '“Keep the channel open, Rhea. I’m heading into the laundromat now.”',
+            labelZh: '“保持通道开启，Rhea。我现在进洗衣房。”',
+          },
+        ],
+      },
+      {
+        id: 'rhea_node_2_cautious',
+        speaker: 'Rhea Solis',
+        body: 'Still keeping your cards to yourself, Eli. I won’t force you—my decision is final for tonight. Watch yourself around the laundromat; Vespera patrol cars just circled the block.',
+        bodyZh:
+          '还是什么都不肯透露吗，Eli。我不勉强你——今晚的接触到此为止。进洗衣房时小心点，Vespera 的巡逻车刚在街区转了一圈。',
+        choices: [
+          {
+            id: 'rhea_c2_cautious_done',
+            label: 'Step back into the rain toward the 24-Hour Coin Laundry.',
+            labelZh: '转身走入雨夜，朝 24 小时自助洗衣房走去。',
           },
         ],
       },
@@ -905,6 +942,7 @@ export function createInitialDeadAirState(
     soundEnabled: true,
     debugMode: false,
     completedEvents: [],
+    resolvedDialogueNodes: {},
     inspectedFiles: [],
     endingId: null,
     flags: {
@@ -924,6 +962,7 @@ export function createInitialDeadAirState(
       player_exposure: 10,
       discovered_eli_account_reuse: false,
       soc_warning_triggered: false,
+      camera_tracking_risk: false,
       camera_tracked: false,
       current_objective:
         'Step 1: Open your vibrating smartphone [P] and make your first response choice.',

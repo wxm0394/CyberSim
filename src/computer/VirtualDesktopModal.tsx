@@ -70,6 +70,10 @@ export const VirtualDesktopModal: React.FC<VirtualDesktopModalProps> = ({
     },
     { label: 'verify (Correlate Timeline)', cmd: 'verify' },
     {
+      label: 'probe 10.88.14.9 (Enclave Probe)',
+      cmd: 'probe 10.88.14.9',
+    },
+    {
       label: 'cat lantern_auth_audit.db (MOTH Vault)',
       cmd: 'cat /home/eli/archive_vault/lantern_auth_audit.db',
     },

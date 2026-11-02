@@ -63,6 +63,7 @@ export interface NarrativeFlags {
   player_exposure: number; // 0 to 100
   discovered_eli_account_reuse: boolean;
   soc_warning_triggered: boolean;
+  camera_tracking_risk: boolean;
   camera_tracked: boolean;
   current_objective: string;
 }
@@ -197,6 +198,7 @@ export interface DeadAirState {
   soundEnabled: boolean;
   debugMode: boolean;
   completedEvents: string[];
+  resolvedDialogueNodes: Record<string, string>;
   inspectedFiles: string[];
   endingId: ChapterEndingId;
   flags: NarrativeFlags;

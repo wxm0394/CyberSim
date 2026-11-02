@@ -123,6 +123,48 @@ export function migrateDeadAirSave(
     };
   });
 
+  // Merge hotspots inspection state per scene
+  const migratedHotspots: DeadAirState['hotspots'] = {
+    APARTMENT_NIGHT: base.hotspots.APARTMENT_NIGHT.map((baseHs) => {
+      const savedHs = candidate.hotspots?.APARTMENT_NIGHT?.find(
+        (h) => h.id === baseHs.id
+      );
+      return savedHs
+        ? { ...baseHs, inspected: Boolean(savedHs.inspected) }
+        : baseHs;
+    }),
+    STREET_NIGHT: base.hotspots.STREET_NIGHT.map((baseHs) => {
+      const savedHs = candidate.hotspots?.STREET_NIGHT?.find(
+        (h) => h.id === baseHs.id
+      );
+      return savedHs
+        ? { ...baseHs, inspected: Boolean(savedHs.inspected) }
+        : baseHs;
+    }),
+    LAUNDROMAT: base.hotspots.LAUNDROMAT.map((baseHs) => {
+      const savedHs = candidate.hotspots?.LAUNDROMAT?.find(
+        (h) => h.id === baseHs.id
+      );
+      return savedHs
+        ? { ...baseHs, inspected: Boolean(savedHs.inspected) }
+        : baseHs;
+    }),
+    APARTMENT_RETURN: base.hotspots.APARTMENT_RETURN.map((baseHs) => {
+      const savedHs = candidate.hotspots?.APARTMENT_RETURN?.find(
+        (h) => h.id === baseHs.id
+      );
+      return savedHs
+        ? { ...baseHs, inspected: Boolean(savedHs.inspected) }
+        : baseHs;
+    }),
+  };
+
+  const resolvedDialogueNodes: Record<string, string> =
+    candidate.resolvedDialogueNodes &&
+    typeof candidate.resolvedDialogueNodes === 'object'
+      ? { ...candidate.resolvedDialogueNodes }
+      : {};
+
   return {
     ...base,
     saveVersion: CURRENT_SAVE_VERSION,
@@ -144,6 +186,7 @@ export function migrateDeadAirSave(
         : true,
     debugMode: false,
     completedEvents,
+    resolvedDialogueNodes,
     inspectedFiles,
     endingId: candidate.endingId || null,
     flags: {
@@ -158,11 +201,13 @@ export function migrateDeadAirSave(
         candidate.flags.soc_warning_triggered ||
           (candidate.flags.corporate_suspicion ?? 0) >= 25
       ),
-      camera_tracked: Boolean(
-        candidate.flags.camera_tracked ||
+      camera_tracking_risk: Boolean(
+        candidate.flags.camera_tracking_risk ||
           (candidate.flags.player_exposure ?? 0) >= 20
       ),
+      camera_tracked: Boolean(candidate.flags.camera_tracked),
     },
+    hotspots: migratedHotspots,
     evidence: migratedEvidence,
     files: migratedFiles,
     inventory: migratedInventory,

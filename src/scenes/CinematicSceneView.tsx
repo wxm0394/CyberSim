@@ -128,20 +128,22 @@ export const CinematicSceneView: React.FC<CinematicSceneViewProps> = ({
 
         {/* Subtle Utility Controls */}
         <div className="flex items-center gap-2">
-          <button
-            type="button"
-            data-testid="toggle-debug-btn"
-            onClick={onToggleDebugMode}
-            title="Toggle Developer Debug Mode"
-            className={`px-2.5 py-1.5 rounded border text-[11px] font-mono flex items-center gap-1.5 transition cursor-pointer ${
-              state.debugMode
-                ? 'border-[#D89B3C] bg-[#D89B3C]/20 text-[#D89B3C]'
-                : 'border-white/10 bg-[#12171D] text-[#8E98A4] hover:text-[#E3E7EB]'
-            }`}
-          >
-            <Wrench className="w-3.5 h-3.5" />
-            <span>DEV</span>
-          </button>
+          {import.meta.env.DEV && (
+            <button
+              type="button"
+              data-testid="toggle-debug-btn"
+              onClick={onToggleDebugMode}
+              title="Toggle Developer Debug Mode (Dev Environment Only)"
+              className={`px-2.5 py-1.5 rounded border text-[11px] font-mono flex items-center gap-1.5 transition cursor-pointer ${
+                state.debugMode
+                  ? 'border-[#D89B3C] bg-[#D89B3C]/20 text-[#D89B3C]'
+                  : 'border-white/10 bg-[#12171D] text-[#8E98A4] hover:text-[#E3E7EB]'
+              }`}
+            >
+              <Wrench className="w-3.5 h-3.5" />
+              <span>DEV</span>
+            </button>
+          )}
           <button
             type="button"
             onClick={onToggleSound}
@@ -250,11 +252,14 @@ export const CinematicSceneView: React.FC<CinematicSceneViewProps> = ({
             </span>
           </div>
           {(state.flags.corporate_suspicion >= 25 ||
-            state.flags.player_exposure >= 20) && (
+            state.flags.camera_tracked ||
+            state.flags.camera_tracking_risk) && (
             <div className="pt-1.5 border-t border-[#C94B4B]/40 text-[11px] text-[#C94B4B] flex items-center gap-1.5">
               <AlertTriangle className="w-3.5 h-3.5 shrink-0" />
               <span>
-                {state.flags.corporate_suspicion >= 25
+                {state.flags.camera_tracked
+                  ? 'Optical Camera #04 Locked'
+                  : state.flags.corporate_suspicion >= 25
                   ? 'SOC Threat Alert Active'
                   : 'Municipal Camera Tracking Risk'}
               </span>

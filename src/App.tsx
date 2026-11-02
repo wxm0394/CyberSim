@@ -104,12 +104,17 @@ export default function App() {
               : openPhoneOverlay(prev)
           );
         } else if (e.key === 'c' || e.key === 'C') {
-          soundFX.playTone('terminal', state.soundEnabled);
-          setState((prev) => ({
-            ...prev,
-            activeOverlay:
-              prev.activeOverlay === 'COMPUTER' ? 'NONE' : 'COMPUTER',
-          }));
+          if (
+            state.currentScene === 'APARTMENT_NIGHT' ||
+            state.currentScene === 'APARTMENT_RETURN'
+          ) {
+            soundFX.playTone('terminal', state.soundEnabled);
+            setState((prev) => ({
+              ...prev,
+              activeOverlay:
+                prev.activeOverlay === 'COMPUTER' ? 'NONE' : 'COMPUTER',
+            }));
+          }
         } else if (e.key === 'j' || e.key === 'J') {
           soundFX.playTone('click', state.soundEnabled);
           setState((prev) => ({

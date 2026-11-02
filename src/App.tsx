@@ -17,6 +17,7 @@ import {
   soundFX,
 } from './persistence/storage';
 import {
+  canAccessWorkstation,
   inspectHotspot,
   transitionToScene,
   handleFirstPhoneChoice,
@@ -25,6 +26,8 @@ import {
   selectCharacterDialogueChoice,
   executeDeadAirCommand,
   openPhoneOverlay,
+  openWorkstationOverlay,
+  toggleWorkstationOverlay,
   resolveChapterOneEnding,
 } from './game/storyEngine';
 import { CHAPTER_ONE_ENDINGS } from './data/storyData';
@@ -104,17 +107,10 @@ export default function App() {
               : openPhoneOverlay(prev)
           );
         } else if (e.key === 'c' || e.key === 'C') {
-          if (
-            state.currentScene === 'APARTMENT_NIGHT' ||
-            state.currentScene === 'APARTMENT_RETURN'
-          ) {
+          if (canAccessWorkstation(state)) {
             soundFX.playTone('terminal', state.soundEnabled);
-            setState((prev) => ({
-              ...prev,
-              activeOverlay:
-                prev.activeOverlay === 'COMPUTER' ? 'NONE' : 'COMPUTER',
-            }));
           }
+          setState((prev) => toggleWorkstationOverlay(prev));
         } else if (e.key === 'j' || e.key === 'J') {
           soundFX.playTone('click', state.soundEnabled);
           setState((prev) => ({
@@ -128,7 +124,12 @@ export default function App() {
 
     window.addEventListener('keydown', onKeyDown);
     return () => window.removeEventListener('keydown', onKeyDown);
-  }, [state.shellState, state.soundEnabled, handleStartGame]);
+  }, [
+    state.shellState,
+    state.currentScene,
+    state.soundEnabled,
+    handleStartGame,
+  ]);
 
   const onInspectHotspot = (hotspotId: string) => {
     soundFX.playTone('click', state.soundEnabled);
@@ -204,7 +205,7 @@ export default function App() {
         }}
         onOpenComputer={() => {
           soundFX.playTone('terminal', state.soundEnabled);
-          setState((prev) => ({ ...prev, activeOverlay: 'COMPUTER' }));
+          setState((prev) => openWorkstationOverlay(prev));
         }}
         onOpenJournal={() => {
           soundFX.playTone('click', state.soundEnabled);
@@ -222,12 +223,10 @@ export default function App() {
           state={state}
           onSelectFirstChoice={onSelectFirstChoice}
           onOpenWorkstation={() => {
-            soundFX.playTone('terminal', state.soundEnabled);
-            setState((prev) => ({
-              ...prev,
-              activeOverlay: 'COMPUTER',
-              activeComputerApp: 'FILES',
-            }));
+            if (canAccessWorkstation(state)) {
+              soundFX.playTone('terminal', state.soundEnabled);
+            }
+            setState((prev) => openWorkstationOverlay(prev, 'FILES'));
           }}
           onClose={() =>
             setState((prev) => ({ ...prev, activeOverlay: 'NONE' }))
@@ -257,8 +256,8 @@ export default function App() {
         />
       )}
 
-      {/* Diegetic In-World Workstation OS Overlay */}
-      {state.activeOverlay === 'COMPUTER' && (
+      {/* Diegetic In-World Workstation OS Overlay (Strictly guarded to Apartment 4B scenes) */}
+      {state.activeOverlay === 'COMPUTER' && canAccessWorkstation(state) && (
         <VirtualDesktopModal
           state={state}
           onSelectApp={onSelectComputerApp}

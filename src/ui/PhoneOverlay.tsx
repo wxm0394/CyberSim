@@ -1,5 +1,6 @@
 import React from 'react';
 import { DeadAirState, FirstPhoneChoice } from '../game/types';
+import { canAccessWorkstation } from '../game/storyEngine';
 import {
   PhoneCall,
   MessageSquareWarning,
@@ -216,7 +217,7 @@ export const PhoneOverlay: React.FC<PhoneOverlayProps> = ({
           </div>
         </div>
 
-        {/* Footer CTA to transition directly to Workstation OS */}
+        {/* Footer CTA — Workstation boot is strictly restricted to Apartment 4B scenes */}
         <div className="flex items-center justify-between px-5 py-3 bg-[#12171D] border-t border-white/10">
           <div className="text-xs font-mono text-[#8E98A4] tabular-nums">
             NADIA TRUST: {state.flags.trust_nadia}% · SUSPICION:{' '}
@@ -224,14 +225,25 @@ export const PhoneOverlay: React.FC<PhoneOverlayProps> = ({
             {state.flags.player_exposure}%
           </div>
           <div className="flex items-center gap-2.5">
-            <button
-              type="button"
-              data-testid="phone-to-workstation-btn"
-              onClick={onOpenWorkstation}
-              className="px-4 py-2 rounded bg-[#4FA3B8] hover:bg-[#5eb3c8] text-[#080B0E] font-mono font-semibold text-xs uppercase tracking-wider transition cursor-pointer"
-            >
-              BOOT WORKSTATION (incident_0427.zip) →
-            </button>
+            {canAccessWorkstation(state) ? (
+              <button
+                type="button"
+                data-testid="phone-to-workstation-btn"
+                onClick={onOpenWorkstation}
+                className="px-4 py-2 rounded bg-[#4FA3B8] hover:bg-[#5eb3c8] text-[#080B0E] font-mono font-semibold text-xs uppercase tracking-wider transition cursor-pointer"
+              >
+                BOOT WORKSTATION (incident_0427.zip) →
+              </button>
+            ) : (
+              <button
+                type="button"
+                data-testid="phone-return-scene-btn"
+                onClick={onClose}
+                className="px-4 py-2 rounded border border-white/15 bg-[#080B0E] hover:border-[#4FA3B8]/60 text-[#C2CAD3] font-mono text-xs uppercase tracking-wider transition cursor-pointer"
+              >
+                PUT PHONE AWAY (WORKSTATION IN APT 4B)
+              </button>
+            )}
           </div>
         </div>
       </div>

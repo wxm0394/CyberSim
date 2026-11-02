@@ -6,6 +6,7 @@ import {
 } from '../data/storyData';
 import {
   canAccessVirtualFile,
+  canAccessWorkstation,
   canTransitionToScene,
   correlateEvidenceTimeline,
   executeDeadAirCommand,
@@ -14,12 +15,14 @@ import {
   inspectHotspot,
   inspectVirtualFile,
   openPhoneOverlay,
+  openWorkstationOverlay,
   selectCharacterDialogueChoice,
+  toggleWorkstationOverlay,
   transitionToScene,
 } from './storyEngine';
 import { clearDeadAirSave, migrateDeadAirSave } from '../persistence/storage';
 
-describe('DEAD AIR V0.2 — Narrative Integrity & Consequence System', () => {
+describe('DEAD AIR V0.2.2 — Narrative Integrity, Workstation Access & Probe Integrity', () => {
   it('1. initializes game state with saveVersion 2, APARTMENT_NIGHT at 02:17 AM, and 0 discovered evidence', () => {
     const state = createInitialDeadAirState('playing');
     assert.equal(state.saveVersion, CURRENT_SAVE_VERSION);
@@ -157,7 +160,7 @@ describe('DEAD AIR V0.2 — Narrative Integrity & Consequence System', () => {
     assert.equal(hasMothArchiveKey(state), true);
     assert.equal(state.currentScene, 'LAUNDROMAT');
 
-    // P0 #1 verification: Even with moth_archive.key acquired, reading lantern_auth_audit.db while still in LAUNDROMAT MUST fail!
+    // Even with moth_archive.key acquired, reading lantern_auth_audit.db while still in LAUNDROMAT MUST fail!
     const dbFileInLaundromat = state.files.find(
       (f) => f.path === '/home/eli/archive_vault/lantern_auth_audit.db'
     )!;
@@ -295,7 +298,7 @@ describe('DEAD AIR V0.2 — Narrative Integrity & Consequence System', () => {
     state = handleFirstPhoneChoice(state, 'CALL_NADIA'); // exposure 10 + 15 = 25
     assert.equal(state.flags.player_exposure, 25);
 
-    // Improvement ② verification: exposure >= 20 sets camera_tracking_risk = true, but camera_tracked MUST remain false before inspecting hs_camera
+    // exposure >= 20 sets camera_tracking_risk = true, but camera_tracked MUST remain false before inspecting hs_camera
     assert.equal(state.flags.camera_tracking_risk, true);
     assert.equal(state.flags.camera_tracked, false);
 
@@ -332,10 +335,13 @@ describe('DEAD AIR V0.2 — Narrative Integrity & Consequence System', () => {
     );
     assert.equal(pathAllied.flags.journalist_contact, true);
     assert.equal(pathAllied.flags.rhea_allied, true);
-    assert.equal(pathAllied.resolvedDialogueNodes['rhea:rhea_node_1'], 'rhea_c1_share');
+    assert.equal(
+      pathAllied.resolvedDialogueNodes['rhea:rhea_node_1'],
+      'rhea_c1_share'
+    );
 
-    // Improvement ① verification: Choosing rhea_c1_cautious locks rhea_node_1 and advances to rhea_node_2_cautious; trying to pick rhea_c1_share afterwards is rejected
-    let pathCautious = selectCharacterDialogueChoice(
+    // Choosing rhea_c1_cautious locks rhea_node_1 and advances to rhea_node_2_cautious; trying to pick rhea_c1_share afterwards is rejected
+    const pathCautious = selectCharacterDialogueChoice(
       base,
       'rhea',
       'rhea_c1_cautious'
@@ -418,12 +424,10 @@ describe('DEAD AIR V0.2 — Narrative Integrity & Consequence System', () => {
 
     // 13C: Authentic, complete gameplay path to ENDING C (THE FALL GUY) without any manual flag mutation
     let stateC = createInitialDeadAirState('playing');
-    // Step 1: Call Nadia on unencrypted cellular line (+15 suspicion -> 30, +15 exposure -> 25)
     stateC = handleFirstPhoneChoice(stateC, 'CALL_NADIA');
     assert.equal(stateC.flags.corporate_suspicion, 30);
     assert.equal(stateC.flags.player_exposure, 25);
 
-    // Step 2: Inspect forensic files and correlate timeline, plus run reckless active subnet probe on Enclave gateway 10.88.14.9 (+15 suspicion -> 45, +15 exposure -> 40)
     stateC = executeDeadAirCommand(stateC, 'cat ntp_override.conf');
     stateC = executeDeadAirCommand(stateC, 'cat access_0427.log');
     stateC = executeDeadAirCommand(stateC, 'probe 10.88.14.9');
@@ -431,20 +435,17 @@ describe('DEAD AIR V0.2 — Narrative Integrity & Consequence System', () => {
     assert.equal(stateC.flags.player_exposure, 40);
     stateC = executeDeadAirCommand(stateC, 'verify');
 
-    // Step 3: Step out to 4th Ave and get spotted by Municipal Optical Pole #04 (+10 suspicion -> 55, +10 exposure -> 50)
     stateC = transitionToScene(stateC, 'STREET_NIGHT');
     stateC = inspectHotspot(stateC, 'hs_camera');
     assert.equal(stateC.flags.camera_tracked, true);
     assert.equal(stateC.flags.corporate_suspicion, 55);
     assert.equal(stateC.flags.player_exposure, 50);
 
-    // Step 4: Interrogate Nadia aggressively in Laundromat (+5 and +10 suspicion -> 70, +5 exposure -> 55)
     stateC = transitionToScene(stateC, 'LAUNDROMAT');
     stateC = selectCharacterDialogueChoice(stateC, 'nadia', 'nadia_c1_question');
     stateC = selectCharacterDialogueChoice(stateC, 'nadia', 'nadia_c2_press');
     stateC = selectCharacterDialogueChoice(stateC, 'nadia', 'nadia_c3_accept');
 
-    // Step 5: Return to Apartment 4B and unlock final database -> triggers ENDING_C_FALL_GUY naturally
     stateC = transitionToScene(stateC, 'APARTMENT_RETURN');
     stateC = executeDeadAirCommand(
       stateC,
@@ -468,7 +469,6 @@ describe('DEAD AIR V0.2 — Narrative Integrity & Consequence System', () => {
       true
     );
 
-    // Improvement ③ verification: migrateDeadAirSave preserves hotspot inspected state and resolvedDialogueNodes
     const roundTripped = migrateDeadAirSave(
       JSON.parse(JSON.stringify(activeState)),
       true
@@ -549,7 +549,6 @@ describe('DEAD AIR V0.2 — Narrative Integrity & Consequence System', () => {
     );
     assert.equal(state.flags.evidence_count, 1);
 
-    // Inspecting the same file 3 more times keeps evidence_count at 1
     state = inspectVirtualFile(
       state,
       '/home/eli/Downloads/incident_0427/ntp_override.conf'
@@ -557,17 +556,15 @@ describe('DEAD AIR V0.2 — Narrative Integrity & Consequence System', () => {
     state = executeDeadAirCommand(state, 'cat ntp_override.conf');
     assert.equal(state.flags.evidence_count, 1);
 
-    // Repeating the same dialogue choice does not stack trustDelta
     state = selectCharacterDialogueChoice(state, 'rhea', 'rhea_c1_share');
     const exposureAfterFirst = state.flags.player_exposure;
     state = selectCharacterDialogueChoice(state, 'rhea', 'rhea_c1_share');
     assert.equal(state.flags.player_exposure, exposureAfterFirst);
   });
 
-  it('17. validates terminal commands against game state (ls, cd, stat, grep, verify, probe)', () => {
+  it('17. validates terminal commands against game state (ls, cd, stat, grep, verify)', () => {
     let state = createInitialDeadAirState('playing');
 
-    // Running verify with 0 discovered evidence outputs Timeline mismatch
     state = executeDeadAirCommand(state, 'verify');
     assert.equal(state.flags.timeline_correlated, false);
     assert.match(
@@ -575,14 +572,12 @@ describe('DEAD AIR V0.2 — Narrative Integrity & Consequence System', () => {
       /Timeline mismatch/
     );
 
-    // Invalid directory cd
     state = executeDeadAirCommand(state, 'cd /root/secret');
     assert.match(
       state.terminalHistory[state.terminalHistory.length - 1].text,
       /File or directory not found/
     );
 
-    // Locked archive vault stat & grep
     state = executeDeadAirCommand(
       state,
       'stat /home/eli/archive_vault/lantern_auth_audit.db'
@@ -600,5 +595,115 @@ describe('DEAD AIR V0.2 — Narrative Integrity & Consequence System', () => {
       state.terminalHistory[state.terminalHistory.length - 1].text,
       /Permission denied/
     );
+  });
+
+  it('18. blocks opening the workstation overlay (via [C] toggle or Phone CTA) when in STREET_NIGHT or LAUNDROMAT', () => {
+    let state = createInitialDeadAirState('playing');
+    assert.equal(canAccessWorkstation(state), true);
+
+    // In APARTMENT_NIGHT, toggleWorkstationOverlay opens COMPUTER
+    state = toggleWorkstationOverlay(state);
+    assert.equal(state.activeOverlay, 'COMPUTER');
+    state = toggleWorkstationOverlay(state);
+    assert.equal(state.activeOverlay, 'NONE');
+
+    // Progress to STREET_NIGHT
+    state = handleFirstPhoneChoice(state, 'WAIT_CHECK_PC');
+    state = inspectVirtualFile(
+      state,
+      '/home/eli/Downloads/incident_0427/ntp_override.conf'
+    );
+    state = inspectVirtualFile(
+      state,
+      '/home/eli/Downloads/incident_0427/access_0427.log'
+    );
+    state = correlateEvidenceTimeline(state);
+    state = transitionToScene(state, 'STREET_NIGHT');
+    assert.equal(canAccessWorkstation(state), false);
+
+    // Attempting to open workstation via [C] shortcut or Phone CTA in STREET_NIGHT must be rejected
+    state = toggleWorkstationOverlay(state);
+    assert.equal(state.activeOverlay, 'NONE');
+    assert.match(state.monologueBanner, /Access restricted/);
+
+    state = openPhoneOverlay(state);
+    assert.equal(state.activeOverlay, 'PHONE');
+    state = openWorkstationOverlay(state, 'FILES');
+    assert.notEqual(state.activeOverlay, 'COMPUTER');
+    assert.equal(state.activeOverlay, 'PHONE');
+
+    // Progress to LAUNDROMAT and verify workstation remains blocked
+    state = transitionToScene(state, 'LAUNDROMAT');
+    assert.equal(canAccessWorkstation(state), false);
+    state = toggleWorkstationOverlay(state);
+    assert.equal(state.activeOverlay, 'NONE');
+
+    // Complete Nadia dialogue and return to APARTMENT_RETURN -> workstation is accessible again
+    state = selectCharacterDialogueChoice(state, 'nadia', 'nadia_c1_share');
+    state = selectCharacterDialogueChoice(state, 'nadia', 'nadia_c2_expose');
+    state = selectCharacterDialogueChoice(state, 'nadia', 'nadia_c3_accept');
+    state = transitionToScene(state, 'APARTMENT_RETURN');
+    assert.equal(canAccessWorkstation(state), true);
+    state = toggleWorkstationOverlay(state);
+    assert.equal(state.activeOverlay, 'COMPUTER');
+  });
+
+  it('19. restricts probe honey-trap strictly to 10.88.14.9 and rejects missing, wrong, or duplicate probes without stacking stats', () => {
+    let state = createInitialDeadAirState('playing');
+    const initialSuspicion = state.flags.corporate_suspicion; // 15
+    const initialExposure = state.flags.player_exposure; // 10
+
+    // 1. Bare `probe` without target IP -> error, 0 stat change
+    state = executeDeadAirCommand(state, 'probe');
+    assert.equal(state.flags.corporate_suspicion, initialSuspicion);
+    assert.equal(state.flags.player_exposure, initialExposure);
+    assert.match(
+      state.terminalHistory[state.terminalHistory.length - 1].text,
+      /missing target host/
+    );
+
+    // 2. Wrong / unrelated IPs -> Network unreachable error, 0 stat change
+    state = executeDeadAirCommand(state, 'probe 192.168.1.254');
+    assert.equal(state.flags.corporate_suspicion, initialSuspicion);
+    assert.equal(state.flags.player_exposure, initialExposure);
+    assert.match(
+      state.terminalHistory[state.terminalHistory.length - 1].text,
+      /Network unreachable/
+    );
+
+    state = executeDeadAirCommand(state, 'probe 8.8.8.8');
+    assert.equal(state.flags.corporate_suspicion, initialSuspicion);
+    assert.equal(state.flags.player_exposure, initialExposure);
+
+    // 3. Local loopback -> nominal output, 0 stat change
+    state = executeDeadAirCommand(state, 'probe 127.0.0.1');
+    assert.equal(state.flags.corporate_suspicion, initialSuspicion);
+    assert.equal(state.flags.player_exposure, initialExposure);
+    assert.match(
+      state.terminalHistory[state.terminalHistory.length - 1].text,
+      /INTERFACE lo0 UP/
+    );
+
+    // 4. First probe of Enclave gateway 10.88.14.9 -> triggers honey-trap (+15 suspicion, +15 exposure)
+    state = executeDeadAirCommand(state, 'probe 10.88.14.9');
+    assert.equal(state.flags.corporate_suspicion, initialSuspicion + 15);
+    assert.equal(state.flags.player_exposure, initialExposure + 15);
+    assert.match(
+      state.terminalHistory[state.terminalHistory.length - 1].text,
+      /IDS HONEY-TRAP TRIGGERED/
+    );
+
+    // 5. Duplicate probes of 10.88.14.9 or alias vespera-enclave-gw -> does NOT stack suspicion or exposure
+    state = executeDeadAirCommand(state, 'probe 10.88.14.9');
+    assert.equal(state.flags.corporate_suspicion, initialSuspicion + 15);
+    assert.equal(state.flags.player_exposure, initialExposure + 15);
+    assert.match(
+      state.terminalHistory[state.terminalHistory.length - 1].text,
+      /already tripped/
+    );
+
+    state = executeDeadAirCommand(state, 'probe vespera-enclave-gw');
+    assert.equal(state.flags.corporate_suspicion, initialSuspicion + 15);
+    assert.equal(state.flags.player_exposure, initialExposure + 15);
   });
 });

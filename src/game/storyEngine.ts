@@ -1,6 +1,7 @@
 import {
   ChapterEndingId,
   CharacterProfile,
+  ComputerAppId,
   DeadAirState,
   EvidenceArtifact,
   FirstPhoneChoice,
@@ -111,6 +112,47 @@ export function hasMothArchiveKey(state: DeadAirState): boolean {
   return Boolean(
     state.inventory.find((i) => i.id === 'item_moth_usb')?.acquired
   );
+}
+
+export function canAccessWorkstation(state: DeadAirState): boolean {
+  return (
+    state.currentScene === 'APARTMENT_NIGHT' ||
+    state.currentScene === 'APARTMENT_RETURN'
+  );
+}
+
+export function openWorkstationOverlay(
+  state: DeadAirState,
+  app?: ComputerAppId
+): DeadAirState {
+  if (!canAccessWorkstation(state)) {
+    const msg =
+      'Access restricted: Your GreyOS workstation is physically inside Apartment 4B. You cannot access it from the street or laundromat.';
+    return {
+      ...state,
+      activeOverlay:
+        state.activeOverlay === 'COMPUTER' ? 'NONE' : state.activeOverlay,
+      monologueBanner: msg,
+      lastFeedbackBanner:
+        'Workstation Unavailable: Return to Apartment 4B to use your desktop.',
+    };
+  }
+
+  return {
+    ...state,
+    activeOverlay: 'COMPUTER',
+    activeComputerApp: app || state.activeComputerApp,
+  };
+}
+
+export function toggleWorkstationOverlay(state: DeadAirState): DeadAirState {
+  if (state.activeOverlay === 'COMPUTER') {
+    return {
+      ...state,
+      activeOverlay: 'NONE',
+    };
+  }
+  return openWorkstationOverlay(state);
 }
 
 export function canAccessVirtualFile(
@@ -1075,50 +1117,102 @@ export function executeDeadAirCommand(
     };
   }
 
-  // High-risk active network probe command (allows reckless hackers to trigger IDS honey-trap)
+  // High-risk active network probe command (strictly validates target IP; only 10.88.14.9 triggers the Vespera Enclave honey-trap once)
   if (cmd === 'probe' || cmd === 'ping' || cmd === 'scan') {
-    const targetIp = arg || '10.88.14.9';
-    const probeKey = `event:active_probe:${targetIp}`;
-    const isFirstProbe = !state.completedEvents.includes(probeKey);
-    const nextSuspicion = isFirstProbe
-      ? clampMetric(state.flags.corporate_suspicion + 15)
-      : state.flags.corporate_suspicion;
-    const nextExposure = isFirstProbe
-      ? clampMetric(state.flags.player_exposure + 15)
-      : state.flags.player_exposure;
+    if (!arg) {
+      const usageMsg =
+        'probe: missing target host or IPv4 address. Usage: probe <target_ip> (e.g., probe 10.88.14.9)';
+      return {
+        ...state,
+        terminalHistory: [
+          ...state.terminalHistory,
+          cmdLine,
+          makeTermLine(usageMsg, 'error'),
+        ],
+        lastFeedbackBanner: usageMsg,
+      };
+    }
 
-    const probedState: DeadAirState = {
+    const targetHost = arg.split(/\s+/)[0].trim().toLowerCase();
+
+    // Safe local loopback check
+    if (
+      targetHost === '127.0.0.1' ||
+      targetHost === 'localhost' ||
+      targetHost === '10.0.2.15'
+    ) {
+      return {
+        ...state,
+        terminalHistory: [
+          ...state.terminalHistory,
+          cmdLine,
+          makeTermLine(
+            `PROBING ${targetHost} (local GreyOS loopback)...\n  INTERFACE lo0 UP — 0ms latency, air-gap filter nominal (no external traffic generated).`,
+            'output'
+          ),
+        ],
+        lastFeedbackBanner: `Local interface ${targetHost} verified (0% risk).`,
+      };
+    }
+
+    // Specific Vespera Executive Enclave gateway honey-trap (10.88.14.9)
+    if (targetHost === '10.88.14.9' || targetHost === 'vespera-enclave-gw') {
+      const probeKey = 'event:active_probe:10.88.14.9';
+      const isFirstProbe = !state.completedEvents.includes(probeKey);
+      const nextSuspicion = isFirstProbe
+        ? clampMetric(state.flags.corporate_suspicion + 15)
+        : state.flags.corporate_suspicion;
+      const nextExposure = isFirstProbe
+        ? clampMetric(state.flags.player_exposure + 15)
+        : state.flags.player_exposure;
+
+      const probedState: DeadAirState = {
+        ...state,
+        completedEvents: isFirstProbe
+          ? [...state.completedEvents, probeKey]
+          : state.completedEvents,
+        flags: {
+          ...state.flags,
+          corporate_suspicion: nextSuspicion,
+          player_exposure: nextExposure,
+        },
+        terminalHistory: [
+          ...state.terminalHistory,
+          cmdLine,
+          makeTermLine(
+            [
+              'PROBING 10.88.14.9 (Vespera Executive Enclave VLAN)...',
+              '  PORT 443/tcp  OPEN   vespera-enclave-gw (TLS 1.3)',
+              '  PORT 8443/tcp OPEN   lantern-sync-controller',
+              isFirstProbe
+                ? '[IDS HONEY-TRAP TRIGGERED] Unmasked SYN probe logged by Director Marcus Hale’s SOC (+15% Corporate Suspicion, +15% Player Exposure)!'
+                : '[IDS WARNING] Subnet canary on 10.88.14.9 already tripped — no additional telemetry delta recorded.',
+            ].join('\n'),
+            'error'
+          ),
+        ],
+        monologueBanner: isFirstProbe
+          ? 'Your active probe against Vespera’s 10.88.14.9 Enclave subnet tripped a canary firewall (+15% Corporate Suspicion, +15% Exposure).'
+          : '10.88.14.9 Enclave canary already tripped; repeating the probe did not change your suspicion or exposure.',
+        lastFeedbackBanner: isFirstProbe
+          ? 'IDS Honey-Trap Tripped: +15% Corporate Suspicion, +15% Player Exposure'
+          : 'IDS Canary Already Active (No extra suspicion/exposure added)',
+      };
+
+      return syncCharactersAndFlags(probedState);
+    }
+
+    // Any other IP or host is unreachable / invalid and does NOT trigger the honey-trap
+    const unreachableMsg = `probe: connect to ${targetHost}: Network unreachable or host not routed in local forensic capture.`;
+    return {
       ...state,
-      completedEvents: isFirstProbe
-        ? [...state.completedEvents, probeKey]
-        : state.completedEvents,
-      flags: {
-        ...state.flags,
-        corporate_suspicion: nextSuspicion,
-        player_exposure: nextExposure,
-      },
       terminalHistory: [
         ...state.terminalHistory,
         cmdLine,
-        makeTermLine(
-          [
-            `PROBING ${targetIp} (Vespera Executive Enclave VLAN)...`,
-            '  PORT 443/tcp  OPEN   vespera-enclave-gw (TLS 1.3)',
-            '  PORT 8443/tcp OPEN   lantern-sync-controller',
-            isFirstProbe
-              ? '[IDS HONEY-TRAP TRIGGERED] Unmasked SYN probe logged by Director Marcus Hale’s SOC (+15% Corporate Suspicion, +15% Player Exposure)!'
-              : '[IDS WARNING] Subnet canary remains on high alert.',
-          ].join('\n'),
-          'error'
-        ),
+        makeTermLine(unreachableMsg, 'error'),
       ],
-      monologueBanner:
-        'Your active probe against Vespera’s 10.88.14.9 Enclave subnet tripped a canary firewall (+15% Corporate Suspicion, +15% Exposure).',
-      lastFeedbackBanner:
-        'IDS Honey-Trap Tripped: +15% Corporate Suspicion, +15% Player Exposure',
+      lastFeedbackBanner: unreachableMsg,
     };
-
-    return syncCharactersAndFlags(probedState);
   }
 
   if (cmd === 'whoami') {

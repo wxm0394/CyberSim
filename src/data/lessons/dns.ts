@@ -7,6 +7,7 @@ export const DNS_LESSON: LearningLesson = {
   title: 'The False Address',
   titleZh: '错误的地址',
   difficulty: 2,
+  sourceTrack: 'network_internet',
   category: 'investigation',
   prerequisites: [],
   isMvpCoreLab: true,

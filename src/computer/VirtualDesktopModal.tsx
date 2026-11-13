@@ -4,7 +4,10 @@ import {
   canAccessVirtualFile,
   hasMothArchiveKey,
 } from '../game/storyEngine';
-import { KnowledgeCategoryId } from '../learning/lessonTypes';
+import {
+  KnowledgeCategoryId,
+  SourceTrackFilter,
+} from '../learning/lessonTypes';
 import { ALL_LEARNING_LESSONS } from '../data/learningMissions';
 import { KnowledgeCodex } from '../ui/KnowledgeCodex';
 import { ForensicTimelineView } from '../components/ForensicTimelineView';
@@ -34,6 +37,7 @@ interface VirtualDesktopModalProps {
   onInspectFile: (filePath: string) => void;
   onExecuteCommand: (cmd: string) => void;
   onCorrelateTimeline: () => void;
+  onSelectLearningSourceTrack?: (track: SourceTrackFilter) => void;
   onSelectLearningCategory: (category: KnowledgeCategoryId | 'all') => void;
   onSelectLearningLesson: (lessonId: string) => void;
   onOpenNetworkLab: (lessonId: string) => void;
@@ -54,6 +58,7 @@ export const VirtualDesktopModal: React.FC<VirtualDesktopModalProps> = ({
   onInspectFile,
   onExecuteCommand,
   onCorrelateTimeline,
+  onSelectLearningSourceTrack,
   onSelectLearningCategory,
   onSelectLearningLesson,
   onOpenNetworkLab,
@@ -849,11 +854,12 @@ export const VirtualDesktopModal: React.FC<VirtualDesktopModalProps> = ({
             </div>
           )}
 
-          {/* APP 6: ELI WARD'S FIELD MANUAL & NETLAB (fq-book Curriculum) */}
+          {/* APP 6: ELI WARD'S FIELD MANUAL & NETLAB (Dual-Source Curriculum) */}
           {state.activeComputerApp === 'MANUAL' && (
             <div className="flex-1 overflow-hidden">
               <KnowledgeCodex
                 state={state}
+                onSelectSourceTrack={onSelectLearningSourceTrack}
                 onSelectCategory={onSelectLearningCategory}
                 onSelectLesson={onSelectLearningLesson}
                 onOpenLab={onOpenNetworkLab}

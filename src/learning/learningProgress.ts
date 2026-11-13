@@ -2,6 +2,7 @@ import {
   KnowledgeCategoryId,
   LearningLesson,
   LearningProgressState,
+  SourceTrackFilter,
   UnlockedCapabilityId,
 } from './lessonTypes';
 import { ALL_LEARNING_LESSONS, getLessonById } from '../data/learningMissions';
@@ -16,6 +17,7 @@ export function createInitialLearningState(): LearningProgressState {
     labResolutionByLesson: {},
     appliedStoryLessons: [],
     bruteForceStoryLessons: [],
+    activeSourceTrack: 'all',
     activeCategoryFilter: 'all',
     selectedLessonId: 'lesson_02_dns',
     activeLabLessonId: null,
@@ -30,18 +32,25 @@ export function migrateLearningState(
     return base;
   }
 
+  const validSourceTrack: SourceTrackFilter =
+    raw.activeSourceTrack === 'network_internet' ||
+    raw.activeSourceTrack === 'tactical_security' ||
+    raw.activeSourceTrack === 'all'
+      ? raw.activeSourceTrack
+      : 'all';
+
   return {
     completedLessonIds: Array.isArray(raw.completedLessonIds)
-      ? [...raw.completedLessonIds]
+      ? Array.from(new Set(raw.completedLessonIds))
       : [],
     unlockedCapabilities: Array.isArray(raw.unlockedCapabilities)
-      ? ([...raw.unlockedCapabilities] as UnlockedCapabilityId[])
+      ? (Array.from(new Set(raw.unlockedCapabilities)) as UnlockedCapabilityId[])
       : [],
     unlockedTools: Array.isArray(raw.unlockedTools)
-      ? [...raw.unlockedTools]
+      ? Array.from(new Set(raw.unlockedTools))
       : [],
     masteredConcepts: Array.isArray(raw.masteredConcepts)
-      ? [...raw.masteredConcepts]
+      ? Array.from(new Set(raw.masteredConcepts))
       : [],
     executedDiagnosticsByLesson:
       raw.executedDiagnosticsByLesson &&
@@ -53,11 +62,12 @@ export function migrateLearningState(
         ? { ...raw.labResolutionByLesson }
         : {},
     appliedStoryLessons: Array.isArray(raw.appliedStoryLessons)
-      ? [...raw.appliedStoryLessons]
+      ? Array.from(new Set(raw.appliedStoryLessons))
       : [],
     bruteForceStoryLessons: Array.isArray(raw.bruteForceStoryLessons)
-      ? [...raw.bruteForceStoryLessons]
+      ? Array.from(new Set(raw.bruteForceStoryLessons))
       : [],
+    activeSourceTrack: validSourceTrack,
     activeCategoryFilter: raw.activeCategoryFilter || 'all',
     selectedLessonId:
       raw.selectedLessonId && getLessonById(raw.selectedLessonId)
@@ -111,11 +121,19 @@ export function areCriticalDiagnosticsComplete(
   return criticalIds.every((id) => executed.includes(id));
 }
 
+export function filterLessonsByTrackAndCategory(
+  track: SourceTrackFilter,
+  category: KnowledgeCategoryId | 'all'
+): LearningLesson[] {
+  return ALL_LEARNING_LESSONS.filter((lesson) => {
+    const matchesTrack = track === 'all' || lesson.sourceTrack === track;
+    const matchesCategory = category === 'all' || lesson.category === category;
+    return matchesTrack && matchesCategory;
+  });
+}
+
 export function filterLessonsByCategory(
   category: KnowledgeCategoryId | 'all'
 ): LearningLesson[] {
-  if (category === 'all') {
-    return ALL_LEARNING_LESSONS;
-  }
-  return ALL_LEARNING_LESSONS.filter((l) => l.category === category);
+  return filterLessonsByTrackAndCategory('all', category);
 }

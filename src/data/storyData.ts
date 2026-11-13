@@ -15,7 +15,7 @@ import {
 } from '../game/types';
 import { createInitialLearningState } from '../learning/learningProgress';
 
-export const CURRENT_SAVE_VERSION = 2;
+export const CURRENT_SAVE_VERSION = 3;
 
 export const CHAPTER_ONE_ENDINGS: Record<
   Exclude<ChapterEndingId, null>,
@@ -546,6 +546,66 @@ Checking Balance : $184.00
 Rent Arrears     : -$1,420.00 (Final Notice on desk)
 Utilities        : -$165.00
 Note: Every full-time sysadmin application in Greyhaven gets rejected within 30 seconds by automated HR screening.`,
+  },
+  {
+    name: 'incident_0427_brief.pdf',
+    path: '/home/eli/Documents/incident_0427_brief.pdf',
+    parentDir: '/home/eli/Documents',
+    size: '412.0 KB',
+    modifiedAt: '01:58:14 AM',
+    unlocked: true,
+    content: `%PDF-1.7 [VESPERA INTERNAL INCIDENT BRIEF — DRAFT]
+Title: Gateway Audit Summary (Incident 0427)
+/Author (e.ward_09)
+/Creator (LibreOffice 7.6 // GreyOS 6.4 // Host: apt4b-workstation)
+/Producer (Vespera Internal DocEngine // Watermark-ID: VSP-EMP-00492)
+/OpenAction << /Type /Action /S /URI /URI (https://telemetry-canary.vespera.internal/pixel/c94a8f12e0/open.png) >>
+# TACTICAL WARNING: Contains identifying XMP/PDF producer metadata (e.ward_09 / apt4b-workstation) and an embedded /OpenAction Canary Token.`,
+  },
+  {
+    name: 'lantern-syncd',
+    path: '/home/eli/Downloads/incident_0427/lantern-syncd',
+    parentDir: '/home/eli/Downloads/incident_0427',
+    size: '1.8 MB',
+    modifiedAt: '01:49:10 AM',
+    unlocked: true,
+    content: `[ELF 64-bit LSB executable, x86-64, dynamically linked, stripped]
+SHA256: 4e8c91b204d9a1c77f03e12098a5b64d7c11e2a908b3f4d1a2c9e0b8f1d47a31
+Hardening: NX=true | PIE=false | Canary=false | RELRO=partial
+Exported Symbols: calc_citizen_threat_score (0x402190), mount_host_shadow_Copy (0x4024c0)
+Embedded Strings: "LANTERN_COLLECTOR_V2", "/host_etc/shadow", "/var/run/docker.sock"`,
+  },
+  {
+    name: 'lantern-collector.json',
+    path: '/home/eli/Downloads/incident_0427/lantern-collector.json',
+    parentDir: '/home/eli/Downloads/incident_0427',
+    size: '3.6 KB',
+    modifiedAt: '01:49:12 AM',
+    unlocked: true,
+    content: `{
+  "ContainerId": "c9f1a8042b1e",
+  "Name": "/lantern-collector-prod",
+  "Image": "registry.vespera.internal/lantern/collector:2.4.1",
+  "User": "0:0 (root)",
+  "HostConfig": {
+    "Privileged": true,
+    "PidMode": "host",
+    "CapAdd": ["CAP_SYS_ADMIN", "CAP_NET_ADMIN", "CAP_SYS_PTRACE"],
+    "Binds": ["/var/run/docker.sock:/var/run/docker.sock:rw", "/etc:/host_etc:ro"]
+  }
+}`,
+  },
+  {
+    name: 'lantern-syncd.trace',
+    path: '/home/eli/Downloads/incident_0427/lantern-syncd.trace',
+    parentDir: '/home/eli/Downloads/incident_0427',
+    size: '9.2 KB',
+    modifiedAt: '01:50:02 AM',
+    unlocked: true,
+    content: `# PRE-RECORDED EBPF SYSCALL TRACE — CONTAINER c9f1a8042b1e (PID 4812: lantern-syncd)
+02:14:09.118Z [PID 4812] openat(AT_FDCWD, "/host_etc/shadow", O_RDONLY) = 7 [HOST_BOUNDARY_VIOLATION]
+02:14:09.402Z [PID 4812] prctl(PR_CAPBSET_READ, CAP_SYS_ADMIN) = 1 [PRIVILEGE_ESCALATION_CHECK]
+02:14:09.890Z [PID 4812] connect(8, {sa_family=AF_UNIX, sun_path="/var/run/docker.sock"}, 23) = 0 [CONTAINER_SOCKET_ESCAPE_RISK]`,
   },
   {
     name: 'lantern_auth_audit.db',
@@ -1276,6 +1336,12 @@ export function createInitialDeadAirState(
       camera_scrubbed: false,
       counter_proof_secured: false,
       compromised_hosts_count: 0,
+      persistence_audit_completed: false,
+      metadata_protection_completed: false,
+      tls_attribution_verified: false,
+      canary_identified: false,
+      hsm_signature_verified: false,
+      lantern_binary_analyzed: false,
       current_objective:
         'Step 1: Open your vibrating smartphone [P] and make your first response choice.',
     },

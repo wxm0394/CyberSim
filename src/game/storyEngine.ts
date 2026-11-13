@@ -1172,8 +1172,8 @@ export function executeDeadAirCommand(
             '  dump 10.88.4.22          Extract Marcus Hale keyring forgery proof from Vespera Edge Gateway (-5% Suspicion)',
             '  probe <target_ip>        Raw SYN probe (WARNING: probing 10.88.14.9 trips Vespera SOC honey-trap)',
             '',
-            '  [FIELD MANUAL & KNOWLEDGE LAB TOOLS (fq-book Curriculum)]',
-            '  manual / codex           List Field Manual & Network Lab modules and unlocked capabilities',
+            '  [FIELD MANUAL — TRACK I: NETWORK & INTERNET (hoochanlon/fq-book, Levels 01-07)]',
+            '  manual / codex           List Field Manual tracks (Track I: 7, Track II: 5, Total: 12) & capabilities',
             '  dns-inspect              Apply Resolver Inspector to purge Vespera DNS sinkhole hook (Level 02)',
             '  cert-verify              Apply Certificate Analyzer to strip rogue Vespera MITM root CA (Level 03)',
             '  route-apply              Apply Proxy Route Editor for WireGuard + SOCKS5h tunnel (Level 04)',
@@ -1181,6 +1181,13 @@ export function executeDeadAirCommand(
             '  topo-map                 Apply Topology Mapper for Host-Only VM sandbox & NAT mapping (Level 05)',
             '  ipfs-verify              Apply Archive Verifier to pin SHA-256 CID of audit ledger (Level 06)',
             '  archive-search           Apply Archive Search & OPSEC scrub to strip legacy headers (Level 07)',
+            '',
+            '  [FIELD MANUAL — TRACK II: TACTICAL SECURITY (Lauren-Bitten/CyberSecurity-Projects, Levels 08-12)]',
+            '  persist-audit [opts]     Audit systemd timers & scrub PDF metadata (--inspect | --quarantine | --sanitize-copy) (Level 08)',
+            '  ja4-inspect [pcap]       Verify canonical JA4 TLS fingerprint & passive TCP handshake telemetry (Level 09)',
+            '  canary-check [target]    Detect PDF Canary Tokens & passive 10.88.14.9 honeypot indicators (Level 10)',
+            '  hsm-verify [artifact]    Verify PKCS#11 ECDSA signature, Key ID (M_HALE_SEC_01) & soft-token flags (Level 11)',
+            '  bin-audit [target/opts]  Audit ELF symbols, CIS Docker escape risks & eBPF syscall traces (Level 12)',
             '  status / whoami / clear  Show operator telemetry or clear terminal',
           ].join('\n'),
           'system'
@@ -1190,12 +1197,33 @@ export function executeDeadAirCommand(
   }
 
   if (cmd === 'manual' || cmd === 'codex' || cmd === 'lab') {
+    const track1Lessons = ALL_LEARNING_LESSONS.filter(
+      (l) => l.sourceTrack === 'network_internet'
+    );
+    const track2Lessons = ALL_LEARNING_LESSONS.filter(
+      (l) => l.sourceTrack === 'tactical_security'
+    );
+    const track1Done = track1Lessons.filter((l) =>
+      state.learning.completedLessonIds.includes(l.id)
+    ).length;
+    const track2Done = track2Lessons.filter((l) =>
+      state.learning.completedLessonIds.includes(l.id)
+    ).length;
+
     const lines = [
-      "ELI WARD'S FIELD MANUAL — GREYOS 6.4 · KNOWLEDGE & TRAINING DATABASE (Adapted from hoochanlon/fq-book):",
-      `Completed Labs: ${state.learning.completedLessonIds.length} / ${ALL_LEARNING_LESSONS.length} · Unlocked Capabilities: ${
+      "ELI WARD'S FIELD MANUAL — GREYOS 6.4 · DUAL-SOURCE KNOWLEDGE & LAB DATABASE:",
+      `  TRACK I  (Network & Internet — hoochanlon/fq-book)                   : ${track1Done} / ${track1Lessons.length}`,
+      `  TRACK II (Tactical Security — Lauren-Bitten/CyberSecurity-Projects) : ${track2Done} / ${track2Lessons.length}`,
+      `  TOTAL COMPLETED LABS                                                 : ${state.learning.completedLessonIds.length} / ${ALL_LEARNING_LESSONS.length}`,
+      `  Unlocked Capabilities: ${
         state.learning.unlockedCapabilities.length > 0
           ? state.learning.unlockedCapabilities.join(', ')
           : 'None yet (Open Field Manual & NetLab tab to run diagnostics)'
+      }`,
+      `  Unlocked CLI Tools   : ${
+        state.learning.unlockedTools.length > 0
+          ? state.learning.unlockedTools.join(', ')
+          : 'None yet'
       }`,
       '-----------------------------------------------------------------------------------------',
       ...ALL_LEARNING_LESSONS.map((l) => {
@@ -1205,10 +1233,11 @@ export function executeDeadAirCommand(
         const applied = state.learning.appliedStoryLessons.includes(l.id)
           ? ' · [FIELD APPLIED]'
           : '';
-        return `  ${l.code.padEnd(20, ' ')} ${l.title} (${l.titleZh}) — ${done}${applied} -> Unlocks: ${l.unlocks.tools.join(', ')}`;
+        const trackTag = l.sourceTrack === 'network_internet' ? '[T1]' : '[T2]';
+        return `  ${trackTag} ${l.code.padEnd(24, ' ')} ${l.title} (${l.titleZh}) — ${done}${applied} -> CLI: ${l.unlocks.tools.join(', ')}`;
       }),
       '-----------------------------------------------------------------------------------------',
-      "Tip: Click the 'Field Manual & NetLab' tab in GreyOS or press [M] to launch interactive Network Labs.",
+      "Tip: Click the 'Field Manual & NetLab' tab in GreyOS or press [M] to filter by Source Track and launch interactive Labs.",
     ];
     return {
       ...state,
@@ -1217,11 +1246,11 @@ export function executeDeadAirCommand(
         cmdLine,
         makeTermLine(lines.join('\n'), 'highlight'),
       ],
-      lastFeedbackBanner: 'Displayed Eli Ward’s Field Manual & Training Database',
+      lastFeedbackBanner: 'Displayed Eli Ward’s Field Manual & Dual-Source Training Database',
     };
   }
 
-  const capHandled = applyCapabilityByCommandName(state, cmd);
+  const capHandled = applyCapabilityByCommandName(state, cmd, arg);
   if (capHandled) {
     return syncCharactersAndFlags(capHandled);
   }

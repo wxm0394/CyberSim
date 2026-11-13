@@ -7,6 +7,7 @@ export const IPFS_LESSON: LearningLesson = {
   title: 'The Dead Letter Network',
   titleZh: '永不消失的档案',
   difficulty: 4,
+  sourceTrack: 'network_internet',
   category: 'distributed_web',
   prerequisites: ['lesson_03_certificates'],
   isMvpCoreLab: false,

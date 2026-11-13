@@ -25,14 +25,29 @@ import {
   applyLessonCapabilityToStory,
   executeLabDiagnosticStep,
   openNetworkLabForLesson,
+  selectLearningCategory,
+  selectLearningSourceTrack,
   submitLabResolution,
 } from '../learning/learningEngine';
-import { CURATED_SOURCE_REGISTRY, FQ_BOOK_ATTRIBUTION_HEADER } from '../learning/sourceRegistry';
+import { filterLessonsByTrackAndCategory } from '../learning/learningProgress';
+import {
+  CURATED_SOURCE_REGISTRY,
+  CYBERSEC_PROJECTS_ATTRIBUTION_HEADER,
+  FQ_BOOK_ATTRIBUTION_HEADER,
+} from '../learning/sourceRegistry';
 import { ALL_LEARNING_LESSONS } from '../data/learningMissions';
+import {
+  analyzeCanaryAndHoneypot,
+  analyzeContainerAndBinary,
+  analyzeHsmAndKeyring,
+  analyzePersistenceAndMetadata,
+  analyzeTlsFingerprinting,
+} from '../simulation/tacticalEngine';
 
-describe('DEAD AIR V0.2.2 — Narrative Integrity, Workstation Access & Probe Integrity', () => {
-  it('1. initializes game state with saveVersion 2, APARTMENT_NIGHT at 02:17 AM, and 0 discovered evidence', () => {
+describe('DEAD AIR V0.4 — Narrative Integrity, Workstation Access, Probe Integrity & Tactical Security Engineering', () => {
+  it('1. initializes game state with saveVersion 3, APARTMENT_NIGHT at 02:17 AM, 0 discovered evidence, and 6 false tactical flags', () => {
     const state = createInitialDeadAirState('playing');
+    assert.equal(state.saveVersion, 3);
     assert.equal(state.saveVersion, CURRENT_SAVE_VERSION);
     assert.equal(state.currentScene, 'APARTMENT_NIGHT');
     assert.equal(state.clockTime, '02:17 AM');
@@ -43,6 +58,12 @@ describe('DEAD AIR V0.2.2 — Narrative Integrity, Workstation Access & Probe In
     assert.equal(state.flags.contacted_moth, false);
     assert.equal(state.flags.camera_tracking_risk, false);
     assert.equal(state.flags.camera_tracked, false);
+    assert.equal(state.flags.persistence_audit_completed, false);
+    assert.equal(state.flags.metadata_protection_completed, false);
+    assert.equal(state.flags.tls_attribution_verified, false);
+    assert.equal(state.flags.canary_identified, false);
+    assert.equal(state.flags.hsm_signature_verified, false);
+    assert.equal(state.flags.lantern_binary_analyzed, false);
   });
 
   it('2. enforces one-time first phone choice and prevents repeated stat accumulation', () => {
@@ -843,11 +864,43 @@ describe('DEAD AIR V0.2.2 — Narrative Integrity, Workstation Access & Probe In
     assert.equal(state.flags.corporate_suspicion, suspicionBeforeCam - 5);
   });
 
-  it('22. enforces fq-book curriculum attribution, lesson prerequisites, and diagnostic gating before analytical resolution', () => {
+  it('22. enforces dual-source curriculum attribution (12 total: 7 Track I + 5 Track II), lesson prerequisites, and diagnostic gating before analytical resolution', () => {
     let state = createInitialDeadAirState('playing');
-    assert.equal(ALL_LEARNING_LESSONS.length, 7);
-    assert.match(FQ_BOOK_ATTRIBUTION_HEADER.upstreamRepository, /hoochanlon\/fq-book/);
-    assert.ok(CURATED_SOURCE_REGISTRY.some((s) => s.curationDecision === 'excluded_unverified'));
+    assert.equal(ALL_LEARNING_LESSONS.length, 12);
+    assert.equal(
+      filterLessonsByTrackAndCategory('network_internet', 'all').length,
+      7
+    );
+    assert.equal(
+      filterLessonsByTrackAndCategory('tactical_security', 'all').length,
+      5
+    );
+    assert.match(
+      FQ_BOOK_ATTRIBUTION_HEADER.upstreamRepository,
+      /hoochanlon\/fq-book/
+    );
+    assert.match(
+      CYBERSEC_PROJECTS_ATTRIBUTION_HEADER.forkRepository,
+      /Lauren-Bitten\/CyberSecurity-Projects/
+    );
+    assert.match(
+      CYBERSEC_PROJECTS_ATTRIBUTION_HEADER.upstreamRepository,
+      /CarterPerez-dev\/Cybersecurity-Projects/
+    );
+    assert.match(CYBERSEC_PROJECTS_ATTRIBUTION_HEADER.license, /AGPL-3\.0/);
+    assert.ok(
+      CURATED_SOURCE_REGISTRY.some(
+        (s) => s.curationDecision === 'excluded_unverified'
+      )
+    );
+    assert.ok(
+      CURATED_SOURCE_REGISTRY.some(
+        (s) =>
+          s.sourceTrack === 'tactical_security' &&
+          s.curationDecision === 'excluded_unverified' &&
+          s.id === 'src-cybersec-excluded-offensive'
+      )
+    );
 
     // Level 03 (Certificates) requires Level 02 (DNS) first
     state = openNetworkLabForLesson(state, 'lesson_03_certificates');
@@ -860,8 +913,14 @@ describe('DEAD AIR V0.2.2 — Narrative Integrity, Workstation Access & Probe In
 
     // Attempting analytical resolution before running the 2 critical diagnostics is blocked
     state = submitLabResolution(state, 'lesson_02_dns', 'res_02_sanitize_dns');
-    assert.equal(state.learning.completedLessonIds.includes('lesson_02_dns'), false);
-    assert.match(state.lastFeedbackBanner || '', /Run diagnostic evidence first/);
+    assert.equal(
+      state.learning.completedLessonIds.includes('lesson_02_dns'),
+      false
+    );
+    assert.match(
+      state.lastFeedbackBanner || '',
+      /Run diagnostic evidence first/
+    );
   });
 
   it('23. completes all 3 MVP Core Labs (DNS, Certificates, Proxy/Tunnel), unlocks capabilities, and applies CLI tools to the investigation', () => {
@@ -979,6 +1038,481 @@ describe('DEAD AIR V0.2.2 — Narrative Integrity, Workstation Access & Probe In
     assert.equal(state.flags.corporate_suspicion, baseSuspicion + 15);
     assert.equal(state.flags.player_exposure, baseExposure + 10);
   });
+
+  it('25. enforces V0.4 Track I/Track II selector filtering, category co-filtering, and sequential prerequisite chain (Level 07 -> 08 -> 09 -> 10 -> 11 -> 12)', () => {
+    let state = createInitialDeadAirState('playing');
+    assert.equal(state.learning.activeSourceTrack, 'all');
+
+    // Switch to Track II: Tactical Security (5 lessons)
+    state = selectLearningSourceTrack(state, 'tactical_security');
+    assert.equal(state.learning.activeSourceTrack, 'tactical_security');
+    assert.equal(state.learning.selectedLessonId, 'lesson_08_persistence');
+
+    // Filter by category within Track II
+    state = selectLearningCategory(state, 'crypto_forensics');
+    assert.equal(state.learning.activeCategoryFilter, 'crypto_forensics');
+    assert.equal(state.learning.selectedLessonId, 'lesson_11_hsm_forensics');
+    assert.equal(
+      filterLessonsByTrackAndCategory('tactical_security', 'crypto_forensics')
+        .length,
+      1
+    );
+
+    // Level 08 is blocked until Level 07 (lesson_07_osint_opsec) is completed
+    state = openNetworkLabForLesson(state, 'lesson_08_persistence');
+    assert.equal(state.learning.activeLabLessonId, null);
+    assert.match(state.lastFeedbackBanner || '', /LEVEL 07/);
+
+    // Complete Level 07 -> unlocks Level 08
+    state = executeLabDiagnosticStep(
+      state,
+      'lesson_07_osint_opsec',
+      'diag_archive_query'
+    );
+    state = executeLabDiagnosticStep(
+      state,
+      'lesson_07_osint_opsec',
+      'diag_opsec_headers'
+    );
+    state = submitLabResolution(
+      state,
+      'lesson_07_osint_opsec',
+      'res_07_passive_osint_scrub'
+    );
+    assert.ok(
+      state.learning.completedLessonIds.includes('lesson_07_osint_opsec')
+    );
+
+    // Switching back to Track I or All Sources preserves completedLessonIds and unlockedCapabilities
+    state = selectLearningSourceTrack(state, 'network_internet');
+    assert.ok(
+      state.learning.completedLessonIds.includes('lesson_07_osint_opsec')
+    );
+    assert.ok(state.learning.unlockedCapabilities.includes('archive_search'));
+
+    // Now Level 08 can be opened, while Level 09 is still blocked until Level 08 completes
+    state = openNetworkLabForLesson(state, 'lesson_09_tls_fingerprinting');
+    assert.equal(state.learning.activeLabLessonId, null);
+    state = openNetworkLabForLesson(state, 'lesson_08_persistence');
+    assert.equal(state.learning.activeLabLessonId, 'lesson_08_persistence');
+  });
+
+  it('26. verifies deterministic passive forensics engines (systemd, metadata, JA4 canonical sorting, Canary/Honeypot, PKCS#11 4-layer HSM, ELF/Docker/eBPF)', () => {
+    const p8 = analyzePersistenceAndMetadata();
+    assert.equal(
+      p8.suspiciousUnit.unitName,
+      'vespera-Support-sync.timer'
+    );
+    assert.ok(p8.metadataFindings.includes('Author: e.ward_09'));
+    assert.ok(p8.report.observedFact.length > 10);
+    assert.ok(p8.report.technicalInference.length > 10);
+    assert.ok(p8.report.narrativeHypothesis.length > 10);
+
+    const p9 = analyzeTlsFingerprinting();
+    assert.equal(
+      p9.computedJa4,
+      't13d0406h2_55b375c5d22e_a19f04c8812b'
+    );
+    assert.equal(
+      p9.baselineBrowserJa4,
+      't13d1516h2_8daaf6152771_e5627efa2ab1'
+    );
+    assert.notEqual(p9.computedJa4, p9.baselineBrowserJa4);
+    assert.equal(p9.isStatelessScan, false);
+
+    const p10 = analyzeCanaryAndHoneypot();
+    assert.equal(p10.canaryTokenId, 'CANARY-VSP-0427-ELI');
+    assert.equal(p10.honeypotHost, '10.88.14.9');
+    assert.equal(p10.honeypotConfidence, 98);
+
+    const p11 = analyzeHsmAndKeyring();
+    assert.equal(p11.verificationBreakdown.signatureMathValid, true);
+    assert.equal(p11.verificationBreakdown.signingKeyId, 'M_HALE_SEC_01');
+    assert.match(
+      p11.verificationBreakdown.tokenMetadata,
+      /CKF_HW_SLOT=false/
+    );
+    assert.equal(
+      p11.verificationBreakdown.hardwareAttestationStatus,
+      'MISSING_HARDWARE_ATTESTATION'
+    );
+    assert.equal(
+      p11.verificationBreakdown.attributedActorInPlaintextLog,
+      'e.ward_09'
+    );
+
+    const p12 = analyzeContainerAndBinary();
+    assert.ok(
+      p12.suspiciousSymbols.includes('calc_citizen_threat_score')
+    );
+    assert.ok(
+      p12.containerEscapeVectors.some((v) => v.includes('docker.sock'))
+    );
+    assert.ok(
+      p12.ebpfBoundaryViolations.some((e) => e.includes('/host_etc/shadow'))
+    );
+  });
+
+  it('27. completes Levels 08-12 sequentially, verifies lab completion does not award free suspicion/exposure bonuses, and strictly isolates the 6 tactical flags from evidence_count', () => {
+    let state = createInitialDeadAirState('playing');
+    state = handleFirstPhoneChoice(state, 'CALL_NADIA'); // suspicion 30, exposure 25
+
+    // Complete prerequisite Level 07
+    state = executeLabDiagnosticStep(
+      state,
+      'lesson_07_osint_opsec',
+      'diag_archive_query'
+    );
+    state = executeLabDiagnosticStep(
+      state,
+      'lesson_07_osint_opsec',
+      'diag_opsec_headers'
+    );
+    state = submitLabResolution(
+      state,
+      'lesson_07_osint_opsec',
+      'res_07_passive_osint_scrub'
+    );
+
+    const suspicionBeforeTrack2 = state.flags.corporate_suspicion;
+    const exposureBeforeTrack2 = state.flags.player_exposure;
+
+    // Complete Levels 08, 09, 10, 11, 12 in order
+    const track2Sequence = [
+      {
+        id: 'lesson_08_persistence',
+        diags: ['diag_08_systemd_scan', 'diag_08_pdf_metadata'],
+        res: 'res_08_quarantine_and_sanitize',
+        cap: 'persistence_auditor' as const,
+      },
+      {
+        id: 'lesson_09_tls_fingerprinting',
+        diags: ['diag_09_compute_ja4', 'diag_09_flow_state'],
+        res: 'res_09_verify_ja4_attribution',
+        cap: 'tls_fingerprint_inspector' as const,
+      },
+      {
+        id: 'lesson_10_counter_deception',
+        diags: ['diag_10_pdf_canary', 'diag_10_honeypot_telemetry'],
+        res: 'res_10_flag_canary_and_honeypot',
+        cap: 'canary_inspector' as const,
+      },
+      {
+        id: 'lesson_11_hsm_forensics',
+        diags: ['diag_11_verify_ecdsa_slot', 'diag_11_keyring_rotation'],
+        res: 'res_11_compile_hsm_proof',
+        cap: 'hsm_verifier' as const,
+      },
+      {
+        id: 'lesson_12_container_binary',
+        diags: ['diag_12_elf_inspect', 'diag_12_container_ebpf_audit'],
+        res: 'res_12_correlate_binary_container_ebpf',
+        cap: 'binary_container_analyzer' as const,
+      },
+    ];
+
+    for (const step of track2Sequence) {
+      for (const d of step.diags) {
+        state = executeLabDiagnosticStep(state, step.id, d);
+      }
+      state = submitLabResolution(state, step.id, step.res);
+      assert.ok(state.learning.completedLessonIds.includes(step.id));
+      assert.ok(state.learning.unlockedCapabilities.includes(step.cap));
+    }
+
+    // Completing the labs alone MUST NOT change suspicion, exposure, the 6 tactical flags, or evidence_count!
+    assert.equal(state.flags.corporate_suspicion, suspicionBeforeTrack2);
+    assert.equal(state.flags.player_exposure, exposureBeforeTrack2);
+    assert.equal(state.flags.persistence_audit_completed, false);
+    assert.equal(state.flags.metadata_protection_completed, false);
+    assert.equal(state.flags.tls_attribution_verified, false);
+    assert.equal(state.flags.canary_identified, false);
+    assert.equal(state.flags.hsm_signature_verified, false);
+    assert.equal(state.flags.lantern_binary_analyzed, false);
+    assert.equal(state.flags.evidence_count, 0);
+
+    // Check `manual` command output shows TRACK I, TRACK II: 5 / 5, and TOTAL
+    state = executeDeadAirCommand(state, 'manual');
+    const manualText =
+      state.terminalHistory[state.terminalHistory.length - 1].text;
+    assert.match(manualText, /TRACK I.*1 \/ 7/);
+    assert.match(manualText, /TRACK II.*5 \/ 5/);
+    assert.match(manualText, /TOTAL COMPLETED LABS.*6 \/ 12/);
+  });
+
+  it('28. validates all 5 new CLI commands (persist-audit, ja4-inspect, canary-check, hsm-verify, bin-audit): lock checks, independent flags, original file preservation, active honey-trap preservation, and idempotency', () => {
+    let state = createInitialDeadAirState('playing');
+    state = handleFirstPhoneChoice(state, 'CALL_NADIA'); // suspicion 30, exposure 25
+
+    // 1. All 5 commands must be rejected when capabilities are locked
+    for (const lockedCmd of [
+      'persist-audit',
+      'ja4-inspect',
+      'canary-check',
+      'hsm-verify',
+      'bin-audit',
+    ]) {
+      state = executeDeadAirCommand(state, lockedCmd);
+      assert.match(state.lastFeedbackBanner || '', /Capability Locked/);
+    }
+
+    // Unlock all Track II capabilities via debugMode or lab completion
+    state = {
+      ...state,
+      learning: {
+        ...state.learning,
+        unlockedCapabilities: [
+          'persistence_auditor',
+          'tls_fingerprint_inspector',
+          'canary_inspector',
+          'hsm_verifier',
+          'binary_container_analyzer',
+        ],
+        unlockedTools: [
+          'persist-audit',
+          'ja4-inspect',
+          'canary-check',
+          'hsm-verify',
+          'bin-audit',
+        ],
+      },
+    };
+
+    // 2. Test `persist-audit`:
+    // 2a. `--inspect` does not set either completion flag
+    state = executeDeadAirCommand(state, 'persist-audit --inspect');
+    assert.equal(state.flags.persistence_audit_completed, false);
+    assert.equal(state.flags.metadata_protection_completed, false);
+
+    // 2b. Invalid target returns error without setting flags
+    state = executeDeadAirCommand(
+      state,
+      'persist-audit --quarantine bogus.timer'
+    );
+    assert.equal(state.flags.persistence_audit_completed, false);
+    assert.equal(
+      state.terminalHistory[state.terminalHistory.length - 1].tone,
+      'error'
+    );
+
+    // 2c. `--quarantine vespera-Support-sync.timer` sets ONLY `persistence_audit_completed = true` (-5 exposure)
+    const expBeforeQ = state.flags.player_exposure;
+    state = executeDeadAirCommand(
+      state,
+      'persist-audit --quarantine vespera-Support-sync.timer'
+    );
+    assert.equal(state.flags.persistence_audit_completed, true);
+    assert.equal(state.flags.metadata_protection_completed, false);
+    assert.equal(state.flags.player_exposure, expBeforeQ - 5);
+    // Repeat quarantine is idempotent
+    state = executeDeadAirCommand(
+      state,
+      'persist-audit --quarantine vespera-Support-sync.timer'
+    );
+    assert.equal(state.flags.player_exposure, expBeforeQ - 5);
+
+    // 2d. `--sanitize-copy incident_0427_brief.pdf` sets `metadata_protection_completed = true`, creates `.clean.pdf`, and preserves original PDF
+    state = executeDeadAirCommand(
+      state,
+      'persist-audit --sanitize-copy incident_0427_brief.pdf'
+    );
+    assert.equal(state.flags.metadata_protection_completed, true);
+    assert.ok(
+      state.files.some(
+        (f) => f.path === '/home/eli/Documents/incident_0427_brief.pdf'
+      )
+    );
+    assert.ok(
+      state.files.some(
+        (f) => f.path === '/home/eli/Documents/incident_0427_brief.clean.pdf'
+      )
+    );
+    assert.ok(
+      state.learning.appliedStoryLessons.includes('lesson_08_persistence')
+    );
+
+    // 3. Test `ja4-inspect`:
+    state = executeDeadAirCommand(state, 'ja4-inspect nonexistent.pcap');
+    assert.equal(state.flags.tls_attribution_verified, false);
+    const suspBeforeJa4 = state.flags.corporate_suspicion;
+    state = executeDeadAirCommand(state, 'ja4-inspect captured_tls_0427');
+    assert.equal(state.flags.tls_attribution_verified, true);
+    assert.equal(state.flags.corporate_suspicion, suspBeforeJa4 - 5);
+    // Repeat is idempotent
+    state = executeDeadAirCommand(state, 'ja4-inspect captured_tls_0427');
+    assert.equal(state.flags.corporate_suspicion, suspBeforeJa4 - 5);
+
+    // 4. Test `canary-check` AND verify `10.88.14.9` active honey-trap remains intact if probed!
+    state = executeDeadAirCommand(state, 'canary-check 192.0.2.99');
+    assert.equal(state.flags.canary_identified, false);
+    state = executeDeadAirCommand(state, 'canary-check 10.88.14.9');
+    assert.equal(state.flags.canary_identified, true);
+
+    const suspBeforeProbe = state.flags.corporate_suspicion;
+    const expBeforeProbe = state.flags.player_exposure;
+    state = executeDeadAirCommand(state, 'probe 10.88.14.9');
+    assert.equal(state.flags.corporate_suspicion, suspBeforeProbe + 15);
+    assert.equal(state.flags.player_exposure, expBeforeProbe + 15);
+
+    // 5. Test `hsm-verify`:
+    state = executeDeadAirCommand(state, 'hsm-verify invalid_file.txt');
+    assert.equal(state.flags.hsm_signature_verified, false);
+    const suspBeforeHsm = state.flags.corporate_suspicion;
+    state = executeDeadAirCommand(state, 'hsm-verify access_0427.log');
+    assert.equal(state.flags.hsm_signature_verified, true);
+    assert.equal(state.flags.corporate_suspicion, suspBeforeHsm - 5);
+    // Repeat is idempotent
+    state = executeDeadAirCommand(state, 'hsm-verify access_0427.log');
+    assert.equal(state.flags.corporate_suspicion, suspBeforeHsm - 5);
+
+    // 6. Test `bin-audit`:
+    state = executeDeadAirCommand(state, 'bin-audit --badflag');
+    assert.equal(state.flags.lantern_binary_analyzed, false);
+    const suspBeforeBin = state.flags.corporate_suspicion;
+    state = executeDeadAirCommand(state, 'bin-audit lantern-syncd');
+    assert.equal(state.flags.lantern_binary_analyzed, true);
+    assert.equal(state.flags.corporate_suspicion, suspBeforeBin - 5);
+    state = executeDeadAirCommand(
+      state,
+      'bin-audit --container lantern-collector.json'
+    );
+    assert.equal(state.flags.corporate_suspicion, suspBeforeBin - 5);
+
+    // 7. Even with all 6 tactical flags true, core Chapter 1 `evidence_count` MUST still be 0!
+    assert.equal(state.flags.evidence_count, 0);
+  });
+
+  it('29. guarantees GUI applyLessonCapabilityToStory and CLI executeDeadAirCommand produce identical state & flags for Track II lessons', () => {
+    const baseState = createInitialDeadAirState('playing');
+    const unlockedState = {
+      ...baseState,
+      learning: {
+        ...baseState.learning,
+        unlockedCapabilities: ['tls_fingerprint_inspector' as const],
+        unlockedTools: ['ja4-inspect'],
+      },
+    };
+
+    const viaGui = applyLessonCapabilityToStory(
+      unlockedState,
+      'lesson_09_tls_fingerprinting',
+      'analytical'
+    );
+    const viaCli = executeDeadAirCommand(
+      unlockedState,
+      'ja4-inspect captured_tls_0427'
+    );
+
+    assert.equal(viaGui.flags.tls_attribution_verified, true);
+    assert.equal(viaCli.flags.tls_attribution_verified, true);
+    assert.equal(
+      viaGui.flags.corporate_suspicion,
+      viaCli.flags.corporate_suspicion
+    );
+    assert.equal(viaGui.flags.trust_nadia, viaCli.flags.trust_nadia);
+    assert.deepEqual(
+      viaGui.learning.appliedStoryLessons,
+      viaCli.learning.appliedStoryLessons
+    );
+  });
+
+  it('30. migrates V1 and V2 saves to Save Version 3 (dead_air_save_v3), preserves currentDir, terminalHistory, and clean PDF copies, and is strictly idempotent', () => {
+    const v2Save = {
+      saveVersion: 2,
+      shellState: 'playing',
+      currentScene: 'STREET_NIGHT',
+      unlockedScenes: ['APARTMENT_NIGHT', 'STREET_NIGHT'],
+      clockTime: '02:45 AM',
+      currentDir: '/home/eli/Documents',
+      terminalHistory: [
+        { id: 't-1', text: 'eli@greyos:~$ ls', tone: 'command' },
+      ],
+      completedEvents: ['event:first_phone_choice'],
+      resolvedDialogueNodes: { 'rhea:rhea_node_1': 'rhea_c1_share' },
+      inspectedFiles: ['/home/eli/Downloads/incident_0427/ntp_override.conf'],
+      flags: {
+        voicemail_played: true,
+        first_choice: 'WAIT_CHECK_PC',
+        first_choice_locked: true,
+        archive_inspected: true,
+        timeline_correlated: true,
+        laundromat_meeting_done: false,
+        trust_nadia: 65,
+        contacted_moth: false,
+        evidence_count: 2,
+        discovered_lantern: false,
+        corporate_suspicion: 15,
+        journalist_contact: true,
+        rhea_allied: true,
+        player_exposure: 10,
+        discovered_eli_account_reuse: false,
+        soc_warning_triggered: false,
+        camera_tracking_risk: false,
+        camera_tracked: false,
+        relay_tunnel_active: true,
+        camera_scrubbed: false,
+        counter_proof_secured: false,
+        compromised_hosts_count: 1,
+        current_objective: 'Head to Laundromat',
+      },
+      evidence: [
+        { id: 'EV-01', discovered: true, correlated: true },
+        { id: 'EV-02', discovered: true, correlated: true },
+      ],
+      files: [],
+      characters: [{ id: 'nadia', trust: 65, currentNodeId: 'nadia_node_1' }],
+      inventory: [{ id: 'item_moth_usb', acquired: false }],
+      networkHosts: [
+        {
+          ip: '172.16.40.12',
+          discovered: true,
+          scanned: true,
+          privilege: 'OPERATOR',
+          compromised: true,
+          actionCompleted: true,
+        },
+      ],
+      learning: {
+        completedLessonIds: ['lesson_02_dns', 'lesson_07_osint_opsec'],
+        unlockedCapabilities: ['resolver_inspector', 'archive_search'],
+        unlockedTools: ['dns-inspect', 'archive-search'],
+        masteredConcepts: ['concept_dns_hierarchy'],
+        executedDiagnosticsByLesson: { lesson_02_dns: ['diag_dns_hosts'] },
+        labResolutionByLesson: { lesson_02_dns: 'analytical' },
+        appliedStoryLessons: ['lesson_02_dns'],
+        bruteForceStoryLessons: [],
+        activeCategoryFilter: 'investigation',
+        selectedLessonId: 'lesson_02_dns',
+        activeLabLessonId: null,
+      },
+    };
+
+    const migratedOnce = migrateDeadAirSave(v2Save, true);
+    assert.equal(migratedOnce.saveVersion, 3);
+    assert.equal(migratedOnce.currentScene, 'STREET_NIGHT');
+    assert.equal(migratedOnce.currentDir, '/home/eli/Documents');
+    assert.equal(migratedOnce.terminalHistory.length, 1);
+    assert.equal(migratedOnce.flags.evidence_count, 2);
+    assert.equal(migratedOnce.flags.persistence_audit_completed, false);
+    assert.equal(migratedOnce.flags.metadata_protection_completed, false);
+    assert.equal(migratedOnce.flags.tls_attribution_verified, false);
+    assert.equal(migratedOnce.flags.canary_identified, false);
+    assert.equal(migratedOnce.flags.hsm_signature_verified, false);
+    assert.equal(migratedOnce.flags.lantern_binary_analyzed, false);
+    assert.equal(migratedOnce.learning.activeSourceTrack, 'all');
+    assert.deepEqual(migratedOnce.learning.completedLessonIds, [
+      'lesson_02_dns',
+      'lesson_07_osint_opsec',
+    ]);
+
+    // Migrating a second time MUST be 100% idempotent
+    const migratedTwice = migrateDeadAirSave(
+      JSON.parse(JSON.stringify(migratedOnce)),
+      true
+    );
+    assert.deepEqual(migratedTwice, migratedOnce);
+  });
 });
+
 
 

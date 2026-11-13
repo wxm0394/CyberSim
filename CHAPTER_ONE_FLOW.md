@@ -1,4 +1,4 @@
-# DEAD AIR V0.3 — Chapter One Flow, Virtual Network & State Machine Guide
+# DEAD AIR V0.4 — Chapter One Flow, Virtual Network, Dual-Source Field Manual & State Machine Guide
 
 ## 1. Scene Progression State Machine
 
@@ -15,6 +15,9 @@ All scene transitions are validated inside `src/game/storyEngine.ts` via `canTra
    │     • `10.40.4.18` (4th Ave Optical Pole #04): `nmap` -> `exploit` (`e.ward_09`) -> `scrub 10.40.4.18` (wipes gait/IMEI NVRAM, -10% Exposure, -5% Suspicion)
    │     • `10.88.4.22` (Vespera Core Telemetry Gateway 02): Discovered via `access_0427.log` -> `nmap` -> `exploit` (requires `svc_lantern_sync` token from `auth_shadow.dump`) -> `dump 10.88.4.22` (extracts Marcus Hale's YubiKey forgery counter-proof, -5% Suspicion)
    │     • `10.88.14.9` (Vespera Executive Enclave): Running `probe 10.88.14.9` trips IDS honey-trap (+15% Suspicion, +15% Exposure)
+   ├─ V0.4 Dual-Source Field Manual & Tactical Security Engineering (Levels 01–12):
+   │     • Track I (`hoochanlon/fq-book`, Levels 01–07): `packet-inspect`, `dns-inspect`, `cert-verify`, `route-apply`, `topo-map`, `ipfs-verify`, `archive-search`
+   │     • Track II (`Lauren-Bitten/CyberSecurity-Projects`, Levels 08–12): `persist-audit`, `ja4-inspect`, `canary-check`, `hsm-verify`, `bin-audit`
    │
    ▼
 [Scene 02: STREET_NIGHT (02:41 AM — 4th Avenue)]
@@ -50,8 +53,20 @@ All scene transitions are validated inside `src/game/storyEngine.ts` via `canTra
 
 | IPv4 / Hostname | Role & Subplot Connection | Prerequisite / Credential | Tactical Operation & Narrative Effect |
 | :--- | :--- | :--- | :--- |
-| `10.0.2.15` (`apt4b-workstation.local`) | Eli Ward's air-gapped GreyOS 6.4 node (`USER`). | Discovered & Scanned by default. | Local staging node for `incident_0427.zip` and `lantern_auth_audit.db`. |
+| `10.0.2.15` (`apt4b-workstation.local`) | Eli Ward's air-gapped GreyOS 6.4 node (`USER`). | Discovered & Scanned by default. | Local staging node for `incident_0427.zip`, `incident_0427_brief.pdf`, and `lantern_auth_audit.db`. |
 | `172.16.40.12` (`moth-sip-relay.port`) | Port District Disposable SIP & SMS Relay (`MOTH_RELAY_0`). | `nmap 172.16.40.12` + First Phone Response completed. | `logs 172.16.40.12` proves Vespera tapped Nadia's handset (`+5% Nadia Trust`). `pivot 172.16.40.12` routes traffic through dark-fiber proxy (`relay_tunnel_active = true`, `-10% Player Exposure`). |
 | `10.40.4.18` (`muni-cam-sector04.gov`) | 4th Ave Municipal Optical Pole #04 Controller. | `nmap 10.40.4.18` or `e.ward_09` credential from `access_0427.log`. | `scrub 10.40.4.18` wipes NVRAM gait/IMEI cache (`camera_scrubbed = true`, clears/prevents `camera_tracked`, `-10% Exposure`, `-5% Suspicion`). |
 | `10.88.4.22` (`vespera-edge-gw02.corp`) | Vespera Core Telemetry & Audit Gateway 02. | Discovered via `access_0427.log`. Requires `nmap 10.88.4.22` + `svc_lantern_sync` shadow token (`0x9F4A2C`) from `auth_shadow.dump`. | `dump 10.88.4.22` (or `logs 10.88.4.22`) extracts `/var/log/kern_keyring.log` proving Director Marcus Hale (`[M_HALE_SEC_01]`) forged Eli's signature (`counter_proof_secured = true`, `-5% Suspicion`). |
-| `10.88.14.9` (`vespera-enclave-gw.corp`) | Vespera Executive Enclave VLAN & IDS Canary. | Discovered via `ntp_override.conf` / `lan_topology.map`. | Protected by active IDS canary; running `probe 10.88.14.9` triggers honey-trap (`+15% Suspicion`, `+15% Exposure`). |
+| `10.88.14.9` (`vespera-enclave-gw.corp`) | Vespera Executive Enclave VLAN & IDS Canary. | Discovered via `ntp_override.conf` / `lan_topology.map`. | Protected by active IDS canary; running `probe 10.88.14.9` triggers honey-trap (`+15% Suspicion`, `+15% Exposure`). Can be passively profiled via `canary-check 10.88.14.9`. |
+
+---
+
+## 3. Track II Tactical Security Engineering Matrix (V0.4, Levels 08–12)
+
+| Level & ID | Prerequisite | Capability & CLI Tool | Story Artifact / Target | Narrative Flag(s) & Consequence |
+| :--- | :--- | :--- | :--- | :--- |
+| **LEVEL 08** (`lesson_08_persistence`) | `lesson_07_osint_opsec` | `persistence_auditor` (`persist-audit`) | `vespera-Support-sync.timer` & `/home/eli/Documents/incident_0427_brief.pdf` | `--quarantine vespera-Support-sync.timer` sets `persistence_audit_completed` (`-5% Exposure`). `--sanitize-copy incident_0427_brief.pdf` writes `incident_0427_brief.clean.pdf` (preserving original PDF) and sets `metadata_protection_completed` (`-5% Suspicion, -5% Exposure, +5% Nadia Trust`). |
+| **LEVEL 09** (`lesson_09_tls_fingerprinting`) | `lesson_08_persistence` | `tls_fingerprint_inspector` (`ja4-inspect`) | `captured_tls_0427` (`10.0.2.15` -> `10.88.10.5:8443`) | Computes canonical JA4 `t13d0406h2_55b375c5d22e_a19f04c8812b` and verifies single-port 3-way TCP handshake; sets `tls_attribution_verified` (`-5% Suspicion, +5% Nadia Trust`). |
+| **LEVEL 10** (`lesson_10_counter_deception`) | `lesson_09_tls_fingerprinting` | `canary_inspector` (`canary-check`) | `incident_0427_brief.pdf` & `10.88.14.9` | Detects `CANARY-VSP-0427-ELI` and confirms `10.88.14.9` is a 98/100 deception honeypot; sets `canary_identified` (`-5% Suspicion, -5% Exposure, +5% Nadia Trust`). Active `probe 10.88.14.9` trap remains armed. |
+| **LEVEL 11** (`lesson_11_hsm_forensics`) | `lesson_10_counter_deception` | `hsm_verifier` (`hsm-verify`) | `access_0427.log` & `kern_keyring.log` | Separates ECDSA-P256 math validity, Key ID `M_HALE_SEC_01`, `SoftHSM-Emulator` (`CKF_HW_SLOT=false`), and missing hardware attestation; sets `hsm_signature_verified` (`-5% Suspicion, +10% Nadia Trust`). |
+| **LEVEL 12** (`lesson_12_container_binary`) | `lesson_11_hsm_forensics` | `binary_container_analyzer` (`bin-audit`) | `lantern-syncd`, `lantern-collector.json`, `lantern-syncd.trace` | Correlates ELF symbol `calc_citizen_threat_score`, privileged `/var/run/docker.sock` bind mount, and eBPF `openat("/host_etc/shadow")`; sets `lantern_binary_analyzed` (`-5% Suspicion, +10% Nadia Trust`). |

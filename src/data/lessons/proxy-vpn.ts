@@ -7,6 +7,7 @@ export const PROXY_VPN_LESSON: LearningLesson = {
   title: 'The Route',
   titleZh: '看不见的通道',
   difficulty: 3,
+  sourceTrack: 'network_internet',
   category: 'routing_tunnels',
   prerequisites: ['lesson_02_dns'],
   isMvpCoreLab: true,

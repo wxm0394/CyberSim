@@ -1,10 +1,19 @@
+export type SourceTrackId = 'network_internet' | 'tactical_security';
+
+export type SourceTrackFilter = 'all' | 'network_internet' | 'tactical_security';
+
 export type KnowledgeCategoryId =
   | 'networking'
   | 'identity_trust'
   | 'routing_tunnels'
   | 'distributed_web'
   | 'investigation'
-  | 'privacy_opsec';
+  | 'privacy_opsec'
+  | 'host_forensics'
+  | 'network_attribution'
+  | 'counter_deception'
+  | 'crypto_forensics'
+  | 'container_appsec';
 
 export type UnlockedCapabilityId =
   | 'packet_inspector'
@@ -14,15 +23,29 @@ export type UnlockedCapabilityId =
   | 'tunnel_monitor'
   | 'topology_mapper'
   | 'archive_verifier'
-  | 'archive_search';
+  | 'archive_search'
+  | 'persistence_auditor'
+  | 'tls_fingerprint_inspector'
+  | 'canary_inspector'
+  | 'hsm_verifier'
+  | 'binary_container_analyzer';
 
 export type ContentReviewStatus = 'reviewed' | 'historical' | 'needs-review';
 
+export type CurationClassification =
+  | 'core_gameplay_lab'
+  | 'historical_context_only'
+  | 'excluded_unverified'
+  | 'pending_review';
+
 export interface SourceAttribution {
-  repository: 'hoochanlon/fq-book';
-  fork: 'wxm0394/fq-book';
+  repository: string;
+  upstreamRepository?: string;
+  fork?: string;
+  projectPaths?: string[];
   sectionPath: string;
   sectionTitle: string;
+  license?: string;
   adaptationNote: string;
   adaptationNoteZh: string;
 }
@@ -113,6 +136,7 @@ export interface LearningLesson {
   title: string;
   titleZh: string;
   difficulty: 1 | 2 | 3 | 4 | 5;
+  sourceTrack: SourceTrackId;
   category: KnowledgeCategoryId;
   prerequisites: string[];
   isMvpCoreLab: boolean;
@@ -134,6 +158,7 @@ export interface CapabilityDescriptor {
   id: UnlockedCapabilityId;
   name: string;
   nameZh: string;
+  sourceTrack: SourceTrackId;
   category: KnowledgeCategoryId;
   unlockedByLessonId: string;
   cliCommand: string;
@@ -152,6 +177,7 @@ export interface LearningProgressState {
   labResolutionByLesson: Record<string, 'analytical' | 'brute_force'>;
   appliedStoryLessons: string[];
   bruteForceStoryLessons: string[];
+  activeSourceTrack: SourceTrackFilter;
   activeCategoryFilter: KnowledgeCategoryId | 'all';
   selectedLessonId: string;
   activeLabLessonId: string | null;

@@ -7,6 +7,7 @@ export const OSINT_LESSON: LearningLesson = {
   title: 'Shadow Footprints',
   titleZh: '数字足迹与暗网边界',
   difficulty: 2,
+  sourceTrack: 'network_internet',
   category: 'privacy_opsec',
   prerequisites: [],
   isMvpCoreLab: false,

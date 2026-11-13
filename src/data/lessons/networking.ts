@@ -7,6 +7,7 @@ export const NETWORKING_LESSON: LearningLesson = {
   title: 'The Ghost in the Wire',
   titleZh: '消失的数据包',
   difficulty: 1,
+  sourceTrack: 'network_internet',
   category: 'networking',
   prerequisites: [],
   isMvpCoreLab: false,

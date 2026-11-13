@@ -802,7 +802,7 @@ export const CinematicSceneView: React.FC<CinematicSceneViewProps> = ({
             <BookOpen className="w-4 h-4 text-[#469A6C]" />
             <span>FIELD MANUAL &amp; NETLAB [M]</span>
             <span className="text-[#469A6C] tabular-nums">
-              ({state.learning.completedLessonIds.length}/7)
+              ({state.learning.completedLessonIds.length}/12)
             </span>
           </button>
         </div>

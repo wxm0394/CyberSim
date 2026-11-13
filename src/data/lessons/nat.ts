@@ -7,6 +7,7 @@ export const NAT_LESSON: LearningLesson = {
   title: 'The Network Maze',
   titleZh: '网络迷宫',
   difficulty: 4,
+  sourceTrack: 'network_internet',
   category: 'routing_tunnels',
   prerequisites: ['lesson_01_networking'],
   isMvpCoreLab: false,

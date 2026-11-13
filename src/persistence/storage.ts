@@ -5,8 +5,9 @@ import {
 } from '../data/storyData';
 import { migrateLearningState } from '../learning/learningProgress';
 
-const STORAGE_KEY_V2 = 'dead_air_save_v2';
-const LEGACY_STORAGE_KEY_V1 = 'dead_air_save_v1';
+export const STORAGE_KEY_V3 = 'dead_air_save_v3';
+export const LEGACY_STORAGE_KEY_V2 = 'dead_air_save_v2';
+export const LEGACY_STORAGE_KEY_V1 = 'dead_air_save_v1';
 
 export function migrateDeadAirSave(
   rawParsed: unknown,
@@ -40,7 +41,7 @@ export function migrateDeadAirSave(
     ? (candidate.currentScene as SceneId)
     : 'APARTMENT_NIGHT';
 
-  // Merge evidence discovery state by ID
+  // Merge evidence discovery state by ID (strictly the 6 core Chapter 1 artifacts EV-01..EV-06)
   const migratedEvidence = base.evidence.map((baseEv) => {
     const savedEv = candidate.evidence?.find((e) => e.id === baseEv.id);
     if (!savedEv) return baseEv;
@@ -59,8 +60,10 @@ export function migrateDeadAirSave(
       : firstChoice !== null;
 
   const unlockedScenes: SceneId[] = Array.isArray(candidate.unlockedScenes)
-    ? (candidate.unlockedScenes.filter((s) =>
-        validScenes.includes(s)
+    ? (Array.from(
+        new Set(
+          candidate.unlockedScenes.filter((s) => validScenes.includes(s))
+        )
       ) as SceneId[])
     : ['APARTMENT_NIGHT'];
   if (!unlockedScenes.includes(currentScene)) {
@@ -68,14 +71,17 @@ export function migrateDeadAirSave(
   }
 
   const completedEvents = Array.isArray(candidate.completedEvents)
-    ? [...candidate.completedEvents]
+    ? Array.from(new Set(candidate.completedEvents))
     : [];
-  if (firstChoiceLocked && !completedEvents.includes('event:first_phone_choice')) {
+  if (
+    firstChoiceLocked &&
+    !completedEvents.includes('event:first_phone_choice')
+  ) {
     completedEvents.push('event:first_phone_choice');
   }
 
   const inspectedFiles = Array.isArray(candidate.inspectedFiles)
-    ? [...candidate.inspectedFiles]
+    ? Array.from(new Set(candidate.inspectedFiles))
     : [];
 
   // Merge inventory acquired state
@@ -90,19 +96,34 @@ export function migrateDeadAirSave(
     migratedInventory.find((i) => i.id === 'item_moth_usb')?.acquired
   );
 
-  // Merge files unlock state
+  // Merge files unlock state + preserve dynamically generated files (e.g. incident_0427_brief.clean.pdf)
   const migratedFiles = base.files.map((baseFile) => {
     const savedFile = candidate.files?.find((f) => f.path === baseFile.path);
     if (baseFile.path === '/home/eli/archive_vault/lantern_auth_audit.db') {
       return {
         ...baseFile,
-        unlocked: Boolean(savedFile?.unlocked || (hasMothKey && currentScene === 'APARTMENT_RETURN')),
+        unlocked: Boolean(
+          savedFile?.unlocked ||
+            (hasMothKey && currentScene === 'APARTMENT_RETURN')
+        ),
       };
     }
     return savedFile
       ? { ...baseFile, unlocked: Boolean(savedFile.unlocked) }
       : baseFile;
   });
+
+  if (Array.isArray(candidate.files)) {
+    for (const extraFile of candidate.files) {
+      if (
+        extraFile &&
+        typeof extraFile.path === 'string' &&
+        !migratedFiles.some((f) => f.path === extraFile.path)
+      ) {
+        migratedFiles.push({ ...extraFile });
+      }
+    }
+  }
 
   const trustNadia =
     typeof candidate.flags.trust_nadia === 'number'
@@ -185,6 +206,17 @@ export function migrateDeadAirSave(
   ).length;
   const cameraScrubbed = Boolean(candidate.flags.camera_scrubbed);
 
+  const migratedCurrentDir =
+    typeof candidate.currentDir === 'string' && candidate.currentDir.trim()
+      ? candidate.currentDir
+      : base.currentDir;
+
+  const migratedTerminalHistory =
+    Array.isArray(candidate.terminalHistory) &&
+    candidate.terminalHistory.length > 0
+      ? candidate.terminalHistory.map((line) => ({ ...line }))
+      : base.terminalHistory;
+
   return {
     ...base,
     saveVersion: CURRENT_SAVE_VERSION,
@@ -236,6 +268,20 @@ export function migrateDeadAirSave(
       camera_scrubbed: cameraScrubbed,
       counter_proof_secured: Boolean(candidate.flags.counter_proof_secured),
       compromised_hosts_count: compromisedHostsCount,
+      persistence_audit_completed: Boolean(
+        candidate.flags.persistence_audit_completed
+      ),
+      metadata_protection_completed: Boolean(
+        candidate.flags.metadata_protection_completed
+      ),
+      tls_attribution_verified: Boolean(
+        candidate.flags.tls_attribution_verified
+      ),
+      canary_identified: Boolean(candidate.flags.canary_identified),
+      hsm_signature_verified: Boolean(candidate.flags.hsm_signature_verified),
+      lantern_binary_analyzed: Boolean(
+        candidate.flags.lantern_binary_analyzed
+      ),
     },
     hotspots: migratedHotspots,
     evidence: migratedEvidence,
@@ -246,6 +292,8 @@ export function migrateDeadAirSave(
     phoneMessages: Array.isArray(candidate.phoneMessages)
       ? candidate.phoneMessages
       : base.phoneMessages,
+    currentDir: migratedCurrentDir,
+    terminalHistory: migratedTerminalHistory,
     learning: migrateLearningState(candidate.learning),
   };
 }
@@ -257,23 +305,47 @@ export function loadDeadAirState(): DeadAirState {
   const params = new URLSearchParams(window.location.search);
   const autostart = params.get('autostart') === '1';
 
+  // 1. Try V3 primary storage key
   try {
-    const rawV2 = window.localStorage.getItem(STORAGE_KEY_V2);
-    if (rawV2) {
-      const parsed = JSON.parse(rawV2);
-      return migrateDeadAirSave(parsed, autostart);
+    const rawV3 = window.localStorage.getItem(STORAGE_KEY_V3);
+    if (rawV3) {
+      const parsedV3 = JSON.parse(rawV3);
+      if (parsedV3 && typeof parsedV3 === 'object' && parsedV3.flags) {
+        return migrateDeadAirSave(parsedV3, autostart);
+      }
     }
+  } catch {
+    // Corrupted V3 JSON: fall through to legacy V2/V1 without overwriting them
+  }
 
-    // Legacy v1 migration path
+  // 2. Try V2 legacy storage key -> migrate to V3 while keeping V2 backup intact
+  try {
+    const rawV2 = window.localStorage.getItem(LEGACY_STORAGE_KEY_V2);
+    if (rawV2) {
+      const parsedV2 = JSON.parse(rawV2);
+      if (parsedV2 && typeof parsedV2 === 'object' && parsedV2.flags) {
+        const migrated = migrateDeadAirSave(parsedV2, autostart);
+        saveDeadAirState(migrated);
+        return migrated;
+      }
+    }
+  } catch {
+    // Corrupted V2 JSON: fall through to V1
+  }
+
+  // 3. Try V1 legacy storage key -> migrate to V3 while keeping V1 backup intact
+  try {
     const rawV1 = window.localStorage.getItem(LEGACY_STORAGE_KEY_V1);
     if (rawV1) {
       const parsedV1 = JSON.parse(rawV1);
-      const migrated = migrateDeadAirSave(parsedV1, autostart);
-      saveDeadAirState(migrated);
-      return migrated;
+      if (parsedV1 && typeof parsedV1 === 'object' && parsedV1.flags) {
+        const migrated = migrateDeadAirSave(parsedV1, autostart);
+        saveDeadAirState(migrated);
+        return migrated;
+      }
     }
   } catch {
-    // Corrupted JSON falls back cleanly
+    // Corrupted V1 JSON: fall back cleanly to initial state
   }
 
   return createInitialDeadAirState(autostart ? 'playing' : 'title');
@@ -286,7 +358,7 @@ export function saveDeadAirState(state: DeadAirState): void {
       ...state,
       saveVersion: CURRENT_SAVE_VERSION,
     };
-    window.localStorage.setItem(STORAGE_KEY_V2, JSON.stringify(payload));
+    window.localStorage.setItem(STORAGE_KEY_V3, JSON.stringify(payload));
   } catch {
     // Ignore storage quota errors
   }
@@ -295,7 +367,8 @@ export function saveDeadAirState(state: DeadAirState): void {
 export function clearDeadAirSave(): DeadAirState {
   if (typeof window !== 'undefined') {
     try {
-      window.localStorage.removeItem(STORAGE_KEY_V2);
+      window.localStorage.removeItem(STORAGE_KEY_V3);
+      window.localStorage.removeItem(LEGACY_STORAGE_KEY_V2);
       window.localStorage.removeItem(LEGACY_STORAGE_KEY_V1);
     } catch {
       // ignore

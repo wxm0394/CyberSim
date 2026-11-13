@@ -1,18 +1,23 @@
 import { DeadAirState, TerminalOutputLine } from '../game/types';
 import {
   KnowledgeCategoryId,
+  SourceTrackFilter,
   UnlockedCapabilityId,
 } from './lessonTypes';
 import {
-  ALL_LEARNING_LESSONS,
   CAPABILITY_DESCRIPTORS,
   getLessonById,
 } from '../data/learningMissions';
 import {
   checkLessonPrerequisites,
+  filterLessonsByTrackAndCategory,
   getExecutedDiagnosticsForLesson,
   hasUnlockedCapability,
 } from './learningProgress';
+import {
+  applyTacticalLessonToStory,
+  executeRegisteredTacticalCommand,
+} from '../simulation/commandRegistry';
 
 function makeTermLine(
   text: string,
@@ -29,14 +34,47 @@ function clampMetric(val: number): number {
   return Math.min(100, Math.max(0, Math.round(val)));
 }
 
+export function selectLearningSourceTrack(
+  state: DeadAirState,
+  track: SourceTrackFilter
+): DeadAirState {
+  const matching = filterLessonsByTrackAndCategory(
+    track,
+    state.learning.activeCategoryFilter
+  );
+  // If current category has 0 matches in the newly selected track, reset category filter to 'all' for that track
+  const effectiveCategory =
+    matching.length > 0 ? state.learning.activeCategoryFilter : 'all';
+  const effectiveMatching =
+    matching.length > 0
+      ? matching
+      : filterLessonsByTrackAndCategory(track, 'all');
+
+  const nextSelected = effectiveMatching.some(
+    (l) => l.id === state.learning.selectedLessonId
+  )
+    ? state.learning.selectedLessonId
+    : effectiveMatching[0]?.id || state.learning.selectedLessonId;
+
+  return {
+    ...state,
+    learning: {
+      ...state.learning,
+      activeSourceTrack: track,
+      activeCategoryFilter: effectiveCategory,
+      selectedLessonId: nextSelected,
+    },
+  };
+}
+
 export function selectLearningCategory(
   state: DeadAirState,
   category: KnowledgeCategoryId | 'all'
 ): DeadAirState {
-  const matching =
-    category === 'all'
-      ? ALL_LEARNING_LESSONS
-      : ALL_LEARNING_LESSONS.filter((l) => l.category === category);
+  const matching = filterLessonsByTrackAndCategory(
+    state.learning.activeSourceTrack,
+    category
+  );
   const nextSelected = matching.some(
     (l) => l.id === state.learning.selectedLessonId
   )
@@ -325,6 +363,12 @@ export function applyLessonCapabilityToStory(
       };
     }
 
+    // For Track II Tactical Security lessons (Levels 08-12), delegate directly to the unified command registry
+    const tacticalResult = applyTacticalLessonToStory(state, lesson.id);
+    if (tacticalResult) {
+      return tacticalResult;
+    }
+
     if (state.learning.appliedStoryLessons.includes(lesson.id)) {
       const msg = `${lesson.unlocks.badgeLabel} has already been applied to your active investigation.`;
       return {
@@ -432,9 +476,19 @@ export function applyLessonCapabilityToStory(
 
 export function applyCapabilityByCommandName(
   state: DeadAirState,
-  cliToolName: string
+  cliToolName: string,
+  rawArgs = ''
 ): DeadAirState | null {
   const normalized = cliToolName.trim().toLowerCase();
+  const tacticalHandled = executeRegisteredTacticalCommand(
+    state,
+    normalized,
+    rawArgs
+  );
+  if (tacticalHandled) {
+    return tacticalHandled;
+  }
+
   const capEntry = Object.values(CAPABILITY_DESCRIPTORS).find(
     (c) => c.cliCommand.toLowerCase() === normalized
   );

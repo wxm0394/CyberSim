@@ -122,6 +122,12 @@ export interface NarrativeFlags {
   camera_scrubbed: boolean;
   counter_proof_secured: boolean;
   compromised_hosts_count: number;
+  persistence_audit_completed: boolean;
+  metadata_protection_completed: boolean;
+  tls_attribution_verified: boolean;
+  canary_identified: boolean;
+  hsm_signature_verified: boolean;
+  lantern_binary_analyzed: boolean;
   current_objective: string;
 }
 

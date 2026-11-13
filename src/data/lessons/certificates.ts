@@ -7,6 +7,7 @@ export const CERTIFICATES_LESSON: LearningLesson = {
   title: 'The Broken Trust',
   titleZh: '被伪造的信任',
   difficulty: 3,
+  sourceTrack: 'network_internet',
   category: 'identity_trust',
   prerequisites: ['lesson_02_dns'],
   isMvpCoreLab: true,

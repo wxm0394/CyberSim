@@ -32,6 +32,7 @@ import {
   resolveChapterOneEnding,
 } from './game/storyEngine';
 import {
+  selectLearningSourceTrack,
   selectLearningCategory,
   selectLearningLesson,
   openNetworkLabForLesson,
@@ -40,7 +41,10 @@ import {
   submitLabResolution,
   applyLessonCapabilityToStory,
 } from './learning/learningEngine';
-import { KnowledgeCategoryId } from './learning/lessonTypes';
+import {
+  KnowledgeCategoryId,
+  SourceTrackFilter,
+} from './learning/lessonTypes';
 import { CHAPTER_ONE_ENDINGS } from './data/storyData';
 import { TitleScreen } from './components/TitleScreen';
 import { CinematicSceneView } from './scenes/CinematicSceneView';
@@ -197,6 +201,11 @@ export default function App() {
     setState((prev) => selectNetworkHost(prev, ip));
   };
 
+  const onSelectLearningSourceTrackHandler = (track: SourceTrackFilter) => {
+    soundFX.playTone('click', state.soundEnabled);
+    setState((prev) => selectLearningSourceTrack(prev, track));
+  };
+
   const onSelectLearningCategoryHandler = (
     category: KnowledgeCategoryId | 'all'
   ) => {
@@ -339,6 +348,7 @@ export default function App() {
           <div className="w-full max-w-6xl h-[88vh] rounded-lg border border-[#469A6C]/50 bg-[#080B0E] shadow-2xl overflow-hidden flex flex-col">
             <KnowledgeCodex
               state={state}
+              onSelectSourceTrack={onSelectLearningSourceTrackHandler}
               onSelectCategory={onSelectLearningCategoryHandler}
               onSelectLesson={onSelectLearningLessonHandler}
               onOpenLab={onOpenNetworkLabHandler}
@@ -363,6 +373,7 @@ export default function App() {
           onExecuteCommand={onExecuteCommand}
           onCorrelateTimeline={onCorrelateTimeline}
           onSelectNetworkHost={onSelectNetworkHost}
+          onSelectLearningSourceTrack={onSelectLearningSourceTrackHandler}
           onSelectLearningCategory={onSelectLearningCategoryHandler}
           onSelectLearningLesson={onSelectLearningLessonHandler}
           onOpenNetworkLab={onOpenNetworkLabHandler}

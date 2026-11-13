@@ -345,6 +345,11 @@ function isValidNetworkHostEntry(entry: unknown, strictV3 = false): boolean {
       !isNonEmptyString(entry.subnet) ||
       typeof entry.targetPrivilege !== 'string' ||
       !VALID_PRIVILEGES.includes(entry.targetPrivilege as HostPrivilegeLevel) ||
+      !isNonEmptyString(entry.requiredCredentialHint) ||
+      !isNonEmptyString(entry.requiredCredentialHintZh) ||
+      !isNonEmptyString(entry.actionCommand) ||
+      !isNonEmptyString(entry.actionLabel) ||
+      !isNonEmptyString(entry.actionLabelZh) ||
       !Array.isArray(entry.services) ||
       entry.services.length === 0 ||
       !entry.services.every(isValidNetworkServiceEntry) ||

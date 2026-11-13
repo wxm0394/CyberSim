@@ -2779,4 +2779,192 @@ describe('DEAD AIR V0.4.2 — Narrative Integrity, Workstation Access, Probe Int
       }
     }
   });
+
+  it('36. enforces strict V3 validation for all 5 VirtualHost credential-hint and action fields (requiredCredentialHint, requiredCredentialHintZh, actionCommand, actionLabel, actionLabelZh) and restores V2 backup cleanly', () => {
+    const validV3 = createInitialDeadAirState('playing');
+    assert.equal(validV3.networkHosts.length, 5);
+    assert.equal(isValidV3SaveShape(validV3), true);
+
+    const validV2WithLearningAndCleanPdf = {
+      saveVersion: 2,
+      shellState: 'playing',
+      currentScene: 'LAUNDROMAT',
+      unlockedScenes: ['APARTMENT_NIGHT', 'STREET_NIGHT', 'LAUNDROMAT'],
+      clockTime: '03:08 AM',
+      currentDir: '/home/eli/Documents',
+      terminalHistory: [
+        { id: 't-1', text: 'eli@greyos:~$ ls', tone: 'command' },
+      ],
+      completedEvents: ['event:first_phone_choice'],
+      inspectedFiles: ['/home/eli/Downloads/incident_0427/ntp_override.conf'],
+      flags: {
+        trust_nadia: 79,
+        corporate_suspicion: 11,
+        player_exposure: 9,
+      },
+      evidence: [
+        { id: 'EV-01', discovered: true, correlated: true },
+        { id: 'EV-02', discovered: true, correlated: true },
+      ],
+      files: [
+        {
+          name: 'incident_0427_brief.clean.pdf',
+          path: '/home/eli/Documents/incident_0427_brief.clean.pdf',
+          parentDir: '/home/eli/Documents',
+          size: '398.4 KB',
+          modifiedAt: 'Just now (Sanitized Copy)',
+          unlocked: true,
+          content: '%PDF-1.7 [SANITIZED FORENSIC COPY]',
+        },
+      ],
+      characters: [{ id: 'nadia', trust: 79, currentNodeId: 'nadia_node_1' }],
+      inventory: [{ id: 'item_moth_usb', acquired: true }],
+      learning: {
+        completedLessonIds: ['lesson_02_dns', 'lesson_07_osint_opsec'],
+        unlockedCapabilities: ['resolver_inspector', 'archive_search'],
+        unlockedTools: ['dns-inspect', 'archive-search'],
+        masteredConcepts: ['concept_dns_hierarchy'],
+        executedDiagnosticsByLesson: { lesson_02_dns: ['diag_dns_hosts'] },
+        labResolutionByLesson: { lesson_02_dns: 'analytical' },
+        appliedStoryLessons: ['lesson_02_dns'],
+        bruteForceStoryLessons: [],
+        activeCategoryFilter: 'investigation',
+        selectedLessonId: 'lesson_02_dns',
+        activeLabLessonId: null,
+      },
+    };
+
+    const virtualHostMalformedCases: Array<{
+      name: string;
+      mutator: (base: ReturnType<typeof createInitialDeadAirState>) => unknown;
+    }> = [
+      {
+        name: '1. missing requiredCredentialHint',
+        mutator: (b) => ({
+          ...b,
+          networkHosts: b.networkHosts.map((host, idx) => {
+            if (idx !== 0) return host;
+            const copy: Record<string, unknown> = { ...host };
+            delete copy.requiredCredentialHint;
+            return copy;
+          }),
+        }),
+      },
+      {
+        name: '2. empty requiredCredentialHintZh',
+        mutator: (b) => ({
+          ...b,
+          networkHosts: b.networkHosts.map((host, idx) =>
+            idx === 0 ? { ...host, requiredCredentialHintZh: '   ' } : host
+          ),
+        }),
+      },
+      {
+        name: '3. missing actionCommand',
+        mutator: (b) => ({
+          ...b,
+          networkHosts: b.networkHosts.map((host, idx) => {
+            if (idx !== 0) return host;
+            const copy: Record<string, unknown> = { ...host };
+            delete copy.actionCommand;
+            return copy;
+          }),
+        }),
+      },
+      {
+        name: '4. invalid actionLabel',
+        mutator: (b) => ({
+          ...b,
+          networkHosts: b.networkHosts.map((host, idx) =>
+            idx === 0 ? { ...host, actionLabel: '' } : host
+          ),
+        }),
+      },
+      {
+        name: '5. missing actionLabelZh',
+        mutator: (b) => ({
+          ...b,
+          networkHosts: b.networkHosts.map((host, idx) => {
+            if (idx !== 0) return host;
+            const copy: Record<string, unknown> = { ...host };
+            delete copy.actionLabelZh;
+            return copy;
+          }),
+        }),
+      },
+    ];
+
+    const store = new Map<string, string>();
+    const prevWindow = (globalThis as unknown as { window?: unknown }).window;
+    (globalThis as unknown as { window: unknown }).window = {
+      location: { search: '?autostart=1' },
+      localStorage: {
+        getItem: (k: string) => (store.has(k) ? store.get(k)! : null),
+        setItem: (k: string, v: string) => {
+          store.set(k, String(v));
+        },
+        removeItem: (k: string) => {
+          store.delete(k);
+        },
+      },
+    };
+
+    try {
+      for (const testCase of virtualHostMalformedCases) {
+        const candidateObj = testCase.mutator(
+          JSON.parse(JSON.stringify(validV3))
+        );
+        const rawMalformedV3 = JSON.stringify(candidateObj);
+        assert.equal(
+          isValidV3SaveShape(candidateObj),
+          false,
+          `Expected isValidV3SaveShape to reject ${testCase.name}`
+        );
+
+        store.clear();
+        const rawV2String = JSON.stringify(validV2WithLearningAndCleanPdf);
+        store.set(STORAGE_KEY_V3, rawMalformedV3);
+        store.set(LEGACY_STORAGE_KEY_V2, rawV2String);
+
+        const restoredState = loadDeadAirState();
+        assert.equal(
+          isValidV3SaveShape(restoredState),
+          true,
+          `Restored state from V2 must pass isValidV3SaveShape for ${testCase.name}`
+        );
+        assert.equal(restoredState.currentScene, 'LAUNDROMAT');
+        assert.equal(restoredState.flags.trust_nadia, 79);
+        assert.deepEqual(restoredState.learning.completedLessonIds, [
+          'lesson_02_dns',
+          'lesson_07_osint_opsec',
+        ]);
+        assert.deepEqual(restoredState.learning.executedDiagnosticsByLesson, {
+          lesson_02_dns: ['diag_dns_hosts'],
+        });
+        assert.ok(
+          restoredState.files.some(
+            (f) =>
+              f.path === '/home/eli/Documents/incident_0427_brief.clean.pdf'
+          ),
+          `Dynamic clean PDF file must remain intact for ${testCase.name}`
+        );
+        assert.equal(
+          store.get(LEGACY_STORAGE_KEY_V2),
+          rawV2String,
+          `Original V2 backup must remain unchanged for ${testCase.name}`
+        );
+        assert.equal(
+          store.get(CORRUPTED_STORAGE_KEY_V3_BACKUP),
+          rawMalformedV3,
+          `Malformed V3 payload must be backed up for ${testCase.name}`
+        );
+      }
+    } finally {
+      if (prevWindow === undefined) {
+        delete (globalThis as unknown as { window?: unknown }).window;
+      } else {
+        (globalThis as unknown as { window: unknown }).window = prevWindow;
+      }
+    }
+  });
 });

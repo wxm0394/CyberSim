@@ -1,13 +1,13 @@
-# DEAD AIR — 城市静默 V0.4.3 Technical Architecture & Verification Report
+# DEAD AIR — 城市静默 V0.4.3.1 Technical Architecture & Verification Report
 
 ## 1. Executive Summary
-**DEAD AIR V0.4.3 (Tactical Security Engineering Expansion — Persistence Integrity Finalization)** incrementally hardens the narrative hacker RPG (`Save Version 3`, `dead_air_save_v3`) across **Levels 08–12** adapted from **`Lauren-Bitten/CyberSecurity-Projects`** (upstream reference: **`CarterPerez-dev/Cybersecurity-Projects`**, license: `AGPL-3.0`). All modules operate strictly within an offline, passive-forensics boundary inside `GreyOS 6.4`.
+**DEAD AIR V0.4.3.1 (Tactical Security Engineering Expansion — VirtualHost Schema Closure)** incrementally hardens the narrative hacker RPG (`Save Version 3`, `dead_air_save_v3`) across **Levels 08–12** adapted from **`Lauren-Bitten/CyberSecurity-Projects`** (upstream reference: **`CarterPerez-dev/Cybersecurity-Projects`**, license: `AGPL-3.0`). All modules operate strictly within an offline, passive-forensics boundary inside `GreyOS 6.4`.
 
 ---
 
 ## 2. Epistemic & Implementation Boundary Classification
 
-To maintain technical rigor, every output in the V0.4.3 engine is explicitly classified into one of four categories:
+To maintain technical rigor, every output in the V0.4.3.1 engine is explicitly classified into one of four categories:
 
 ### 2.1 Actually Calculated Results (`src/simulation/cryptoPrimitives.ts`, `src/simulation/tacticalEngine.ts`)
 - **FIPS 180-4 SHA-256 Digest Calculation (`sha256Hex`)**:
@@ -67,8 +67,11 @@ The following artifacts are static, deterministic simulation fixtures authored f
 ## 4. Deep Save Version 3 Validation & Fail-Safe Corrupted V3 Backup Preservation (`src/persistence/storage.ts`)
 - **Element-Level & Nested Schema Validation (`isValidV3SaveShape` & `isValidLegacySaveShape`)**:
   - Validates top-level state properties (`saveVersion === 3`, numeric core risk/trust flags, all 6 boolean V0.4 tactical flags, `currentDir`) and every individual element inside `evidence`, `files`, `characters`, `inventory`, `networkHosts`, `completedEvents`, `inspectedFiles`, `terminalHistory`, `hotspots` (across all 4 scenes), and `learning`.
-  - **Character Dialogue Nodes & Choices (`isValidDialogueNode`, `isValidDialogueChoice`)**: Validates every node's `id`, `speaker`, `body`, `bodyZh`, and non-empty `choices` array, every choice's `id`, `label`, `labelZh`, optional finite `trustDelta`/`suspicionDelta`/`exposureDelta`, optional `unlocksEvidenceId`, and ensures `currentNodeId` and every choice's `nextNodeId` resolve to valid node IDs in `characters[].nodes`.
-  - **Network Host Services & Logs (`isValidNetworkServiceEntry`, `isValidHostLogEntry`)**: Validates every service's integer `port` (`1..65535`), `protocol` (`'tcp' | 'udp'`), non-empty `service` and `version`, `state` (`'open' | 'filtered' | 'canary'`), and optional `vulnerabilityNote`, as well as every host log entry (`id`, `timestamp`, `level`, `message`, optional boolean `scrubbed`).
+  - **Character Dialogue Nodes & Choices (`isValidDialogueNode`, `isValidDialogueChoice`, `isValidCharacterEntry`)**: Validates `id`, `name`, `role`, `roleZh`, `location`, `stance`, `bio`, finite `trust`, `currentNodeId`, every node's `id`, `speaker`, `body`, `bodyZh`, and non-empty `choices` array, every choice's `id`, `label`, `labelZh`, optional finite `trustDelta`/`suspicionDelta`/`exposureDelta`, optional `unlocksEvidenceId`, and ensures `currentNodeId` and every choice's `nextNodeId` resolve to valid node IDs in `characters[].nodes`.
+  - **VirtualHost, Services & Host Logs (`isValidNetworkHostEntry`, `isValidNetworkServiceEntry`, `isValidHostLogEntry`)**:
+    - Validates all required `VirtualHost` fields in strict V3 saves: `ip`, `hostname`, `role`, `roleZh`, `subnet`, boolean `discovered`/`scanned`/`compromised`/`actionCompleted`, `privilege` and `targetPrivilege` (`HostPrivilegeLevel`), and non-empty string `requiredCredentialHint`, `requiredCredentialHintZh`, `actionCommand`, `actionLabel`, and `actionLabelZh`.
+    - Validates every `NetworkService` in `services` (non-empty array): integer `port` (`1..65535`), `protocol` (`'tcp' | 'udp'`), non-empty `service` and `version`, `state` (`'open' | 'filtered' | 'canary'`), and optional non-empty `vulnerabilityNote`.
+    - Validates every log entry in `VirtualHost.logs` against the exact `src/game/types.ts` schema (`id`, `timestamp`, `source`, `entry`, `entryZh` — all non-empty strings).
   - **Authoritative Learning Registry Validation (`isValidLearningObject`)**: Validates `completedLessonIds`, `selectedLessonId`, `activeLabLessonId`, `appliedStoryLessons`, and `bruteForceStoryLessons` against `ALL_LEARNING_LESSONS`; `unlockedCapabilities` and `unlockedTools` against `CAPABILITY_DESCRIPTORS` and lesson tool unlocks; `masteredConcepts` against lesson concepts (plus legacy `'concept_dns_hierarchy'`); `executedDiagnosticsByLesson` keys and diagnostic action IDs against each lesson's `lab.diagnosticActions`; and `labResolutionByLesson` keys and resolution modes (`'analytical' | 'brute_force'`).
 - **Fail-Safe Corrupted V3 Backup Preservation (`preserveMalformedV3BeforeOverwrite` & `loadDeadAirState`)**:
   - When `dead_air_save_v3` contains raw invalid JSON or fails `isValidV3SaveShape`, `loadDeadAirState()` records the exact raw malformed V3 string (`malformedRawV3`) and falls back to `dead_air_save_v2` (and then `dead_air_save_v1` if V2 is absent or invalid).
@@ -77,4 +80,3 @@ The following artifacts are static, deterministic simulation fixtures authored f
   - Original `dead_air_save_v2` and `dead_air_save_v1` keys are never modified or deleted during recovery.
 - **Remaining Browser Storage Limitations**:
   - Persistence relies on synchronous browser `window.localStorage` (typically capped at ~5 MB per origin). Only the single most recent corrupted V3 payload is retained in `dead_air_save_v3_corrupted_backup` (not a multi-slot ring buffer), and if `localStorage` is completely disabled or full, recovered legacy state runs in memory for the active session without persisting to disk.
-

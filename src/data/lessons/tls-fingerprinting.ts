@@ -97,7 +97,7 @@ export const TLS_FINGERPRINTING_LESSON: LearningLesson = {
           '[PCAP TARGET] 10.0.2.15:51944 -> 10.88.10.5:8443 (SNI: gateway.vespera.internal)',
           '  Ciphers (04)   : 1301, 1302, 1303, c02b',
           '  Extensions (06): 0000, 000a, 000b, 000d, 0010, 002b',
-          '  Computed JA4   : t13d0406h2_55b375c5d22e_a19f04c8812b',
+          '  Computed JA4   : t13d0406h2_77f0cd3447db_5d4d534e3685',
           '  Baseline Match : greyos-diag-cli/1.4 (Go crypto/tls minimal diagnostic client)',
           '  Browser Diff   : Does NOT match Firefox 124 (t13d1516h2_8daaf6152771_e5627efa2ab1)',
         ].join('\n'),
@@ -105,14 +105,14 @@ export const TLS_FINGERPRINTING_LESSON: LearningLesson = {
           '【抓包解析】10.0.2.15:51944 -> 10.88.10.5:8443 (SNI: gateway.vespera.internal)',
           '  密码套件 (04) : 1301, 1302, 1303, c02b',
           '  扩展字段 (06) : 0000, 000a, 000b, 000d, 0010, 002b',
-          '  规范化 JA4    : t13d0406h2_55b375c5d22e_a19f04c8812b',
+          '  规范化 JA4    : t13d0406h2_77f0cd3447db_5d4d534e3685',
           '  基线匹配结果  : greyos-diag-cli/1.4（Go crypto/tls 极简诊断客户端）',
           '  浏览器对比    : 与标准 Firefox 124 (t13d1516h2_...) 特征明显不同',
         ].join('\n'),
         revealsClue:
-          'Computed canonical JA4 `t13d0406h2_55b375c5d22e_a19f04c8812b`, matching `greyos-diag-cli/1.4` (4 ciphers, 6 extensions).',
+          'Computed canonical JA4 `t13d0406h2_77f0cd3447db_5d4d534e3685`, matching `greyos-diag-cli/1.4` (4 ciphers, 6 extensions).',
         revealsClueZh:
-          '计算出规范化 JA4 指纹 `t13d0406h2_55b375c5d22e_a19f04c8812b`，精确匹配 `greyos-diag-cli/1.4` 诊断工具特征。',
+          '计算出规范化 JA4 指纹 `t13d0406h2_77f0cd3447db_5d4d534e3685`，精确匹配 `greyos-diag-cli/1.4` 诊断工具特征。',
         isCriticalClue: true,
       },
       {
@@ -182,9 +182,9 @@ export const TLS_FINGERPRINTING_LESSON: LearningLesson = {
       analyticalCommand: 'ja4-inspect captured_tls_0427',
       bruteForceCommand: 'probe 10.88.10.5 --flood',
       analyticalOutcome:
-        'Verified JA4 fingerprint (`t13d0406h2_55b375c5d22e_a19f04c8812b`) and single-port stateful flow telemetry on `captured_tls_0427` (`tls_attribution_verified`, -5% Suspicion, +5% Nadia Trust).',
+        'Verified JA4 fingerprint (`t13d0406h2_77f0cd3447db_5d4d534e3685`) and single-port stateful flow telemetry on `captured_tls_0427` (`tls_attribution_verified`, -5% Suspicion, +5% Nadia Trust).',
       analyticalOutcomeZh:
-        '已完成 `captured_tls_0427` 的 JA4 指纹 (`t13d0406h2_55b375c5d22e_a19f04c8812b`) 与连接状态归因核验（记录 `tls_attribution_verified`，企业怀疑度 -5%，Nadia 信任度 +5%）。',
+        '已完成 `captured_tls_0427` 的 JA4 指纹 (`t13d0406h2_77f0cd3447db_5d4d534e3685`) 与连接状态归因核验（记录 `tls_attribution_verified`，企业怀疑度 -5%，Nadia 信任度 +5%）。',
       bruteForceOutcome:
         'Active packet replay triggered Vespera IDS rate-limiting alerts (+10% Suspicion, +10% Exposure).',
       bruteForceOutcomeZh:

@@ -9,32 +9,117 @@ export const STORAGE_KEY_V3 = 'dead_air_save_v3';
 export const LEGACY_STORAGE_KEY_V2 = 'dead_air_save_v2';
 export const LEGACY_STORAGE_KEY_V1 = 'dead_air_save_v1';
 
+const VALID_SCENES: SceneId[] = [
+  'APARTMENT_NIGHT',
+  'STREET_NIGHT',
+  'LAUNDROMAT',
+  'APARTMENT_RETURN',
+];
+
+export type ValidLegacySaveCandidate = Partial<DeadAirState> & {
+  flags: Partial<DeadAirState['flags']>;
+  evidence: DeadAirState['evidence'];
+  files: DeadAirState['files'];
+  characters: DeadAirState['characters'];
+};
+
+export function isValidLegacySaveShape(
+  raw: unknown
+): raw is ValidLegacySaveCandidate {
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) {
+    return false;
+  }
+  const c = raw as Partial<DeadAirState>;
+  if (
+    !c.flags ||
+    typeof c.flags !== 'object' ||
+    Array.isArray(c.flags) ||
+    typeof c.flags.trust_nadia !== 'number' ||
+    typeof c.flags.corporate_suspicion !== 'number' ||
+    typeof c.flags.player_exposure !== 'number'
+  ) {
+    return false;
+  }
+  if (
+    !Array.isArray(c.evidence) ||
+    !Array.isArray(c.files) ||
+    !Array.isArray(c.characters)
+  ) {
+    return false;
+  }
+  if (
+    typeof c.currentScene !== 'string' ||
+    !VALID_SCENES.includes(c.currentScene as SceneId)
+  ) {
+    return false;
+  }
+  return true;
+}
+
+export function isValidV3SaveShape(raw: unknown): raw is DeadAirState {
+  if (!isValidLegacySaveShape(raw)) {
+    return false;
+  }
+  const c = raw as Partial<DeadAirState>;
+  if (c.saveVersion !== CURRENT_SAVE_VERSION) {
+    return false;
+  }
+  if (
+    !Array.isArray(c.unlockedScenes) ||
+    !Array.isArray(c.inventory) ||
+    !Array.isArray(c.networkHosts) ||
+    !Array.isArray(c.completedEvents) ||
+    !Array.isArray(c.inspectedFiles) ||
+    !Array.isArray(c.terminalHistory) ||
+    typeof c.currentDir !== 'string' ||
+    !c.currentDir.trim()
+  ) {
+    return false;
+  }
+  if (
+    !c.hotspots ||
+    typeof c.hotspots !== 'object' ||
+    !Array.isArray(c.hotspots.APARTMENT_NIGHT) ||
+    !Array.isArray(c.hotspots.STREET_NIGHT) ||
+    !Array.isArray(c.hotspots.LAUNDROMAT) ||
+    !Array.isArray(c.hotspots.APARTMENT_RETURN)
+  ) {
+    return false;
+  }
+  if (
+    !c.learning ||
+    typeof c.learning !== 'object' ||
+    !Array.isArray(c.learning.completedLessonIds) ||
+    !Array.isArray(c.learning.unlockedCapabilities) ||
+    !Array.isArray(c.learning.unlockedTools)
+  ) {
+    return false;
+  }
+  const f = c.flags!;
+  if (
+    typeof f.persistence_audit_completed !== 'boolean' ||
+    typeof f.metadata_protection_completed !== 'boolean' ||
+    typeof f.tls_attribution_verified !== 'boolean' ||
+    typeof f.canary_identified !== 'boolean' ||
+    typeof f.hsm_signature_verified !== 'boolean' ||
+    typeof f.lantern_binary_analyzed !== 'boolean'
+  ) {
+    return false;
+  }
+  return true;
+}
+
 export function migrateDeadAirSave(
   rawParsed: unknown,
   autostart = false
 ): DeadAirState {
   const base = createInitialDeadAirState(autostart ? 'playing' : 'title');
-  if (!rawParsed || typeof rawParsed !== 'object') {
+  if (!isValidLegacySaveShape(rawParsed)) {
     return base;
   }
 
-  const candidate = rawParsed as Partial<DeadAirState>;
-  if (
-    !candidate.flags ||
-    typeof candidate.flags !== 'object' ||
-    !Array.isArray(candidate.evidence) ||
-    !Array.isArray(candidate.files) ||
-    !Array.isArray(candidate.characters)
-  ) {
-    return base;
-  }
-
-  const validScenes: SceneId[] = [
-    'APARTMENT_NIGHT',
-    'STREET_NIGHT',
-    'LAUNDROMAT',
-    'APARTMENT_RETURN',
-  ];
+  const candidate = rawParsed;
+  const validScenes = VALID_SCENES;
   const currentScene: SceneId = validScenes.includes(
     candidate.currentScene as SceneId
   )
@@ -305,47 +390,51 @@ export function loadDeadAirState(): DeadAirState {
   const params = new URLSearchParams(window.location.search);
   const autostart = params.get('autostart') === '1';
 
-  // 1. Try V3 primary storage key
+  // 1. Try V3 primary storage key (requires full valid V3 shape)
   try {
     const rawV3 = window.localStorage.getItem(STORAGE_KEY_V3);
     if (rawV3) {
       const parsedV3 = JSON.parse(rawV3);
-      if (parsedV3 && typeof parsedV3 === 'object' && parsedV3.flags) {
+      if (isValidV3SaveShape(parsedV3)) {
         return migrateDeadAirSave(parsedV3, autostart);
       }
     }
   } catch {
-    // Corrupted V3 JSON: fall through to legacy V2/V1 without overwriting them
+    // Corrupted or incomplete V3 JSON: preserve it and fall through to V2/V1
   }
 
-  // 2. Try V2 legacy storage key -> migrate to V3 while keeping V2 backup intact
+  // 2. Try V2 legacy storage key -> migrate to V3 and write V3 only after successful migration
   try {
     const rawV2 = window.localStorage.getItem(LEGACY_STORAGE_KEY_V2);
     if (rawV2) {
       const parsedV2 = JSON.parse(rawV2);
-      if (parsedV2 && typeof parsedV2 === 'object' && parsedV2.flags) {
+      if (isValidLegacySaveShape(parsedV2)) {
         const migrated = migrateDeadAirSave(parsedV2, autostart);
-        saveDeadAirState(migrated);
-        return migrated;
+        if (isValidV3SaveShape(migrated)) {
+          saveDeadAirState(migrated);
+          return migrated;
+        }
       }
     }
   } catch {
-    // Corrupted V2 JSON: fall through to V1
+    // Corrupted or incomplete V2 JSON: preserve it and fall through to V1
   }
 
-  // 3. Try V1 legacy storage key -> migrate to V3 while keeping V1 backup intact
+  // 3. Try V1 legacy storage key -> migrate to V3 and write V3 only after successful migration
   try {
     const rawV1 = window.localStorage.getItem(LEGACY_STORAGE_KEY_V1);
     if (rawV1) {
       const parsedV1 = JSON.parse(rawV1);
-      if (parsedV1 && typeof parsedV1 === 'object' && parsedV1.flags) {
+      if (isValidLegacySaveShape(parsedV1)) {
         const migrated = migrateDeadAirSave(parsedV1, autostart);
-        saveDeadAirState(migrated);
-        return migrated;
+        if (isValidV3SaveShape(migrated)) {
+          saveDeadAirState(migrated);
+          return migrated;
+        }
       }
     }
   } catch {
-    // Corrupted V1 JSON: fall back cleanly to initial state
+    // Corrupted or incomplete V1 JSON: fall back cleanly to initial state without clobbering existing keys
   }
 
   return createInitialDeadAirState(autostart ? 'playing' : 'title');

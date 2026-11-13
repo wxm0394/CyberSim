@@ -61,7 +61,7 @@ export const TACTICAL_COMMAND_REGISTRY: Record<
     lessonId: 'lesson_12_container_binary',
     requiredCapability: 'binary_container_analyzer',
     usage:
-      'bin-audit [lantern-syncd | --container lantern-collector.json | --trace lantern-syncd.trace]',
+      'bin-audit [lantern-syncd | --container lantern-collector.json | --trace lantern-syncd.trace | --all]',
     summary:
       'Audits ELF binary symbols/mitigations, CIS Docker escape risks, and pre-recorded eBPF syscall traces.',
   },
@@ -629,31 +629,121 @@ function handleBinAudit(
 ): DeadAirState {
   const trimmed = rawArgs.trim();
 
-  const validTargets = new Set([
-    '',
+  const elfTargets = new Set([
     'lantern-syncd',
+    '--elf lantern-syncd',
     '/home/eli/Downloads/incident_0427/lantern-syncd',
+    '--elf /home/eli/Downloads/incident_0427/lantern-syncd',
+  ]);
+  const containerTargets = new Set([
     '--container lantern-collector.json',
     '--container /home/eli/Downloads/incident_0427/lantern-collector.json',
+  ]);
+  const traceTargets = new Set([
     '--trace lantern-syncd.trace',
     '--trace /home/eli/Downloads/incident_0427/lantern-syncd.trace',
+  ]);
+  const containerAndTraceTargets = new Set([
     '--container lantern-collector.json --trace lantern-syncd.trace',
   ]);
+  const explicitAllTargets = new Set([
+    '--all',
+    '--correlate-all',
+    'lantern-syncd --container lantern-collector.json --trace lantern-syncd.trace',
+  ]);
 
-  if (!validTargets.has(trimmed)) {
+  let mode: 'elf' | 'container' | 'trace' | 'all' | 'container_and_trace' | null =
+    null;
+  if (elfTargets.has(trimmed)) {
+    mode = 'elf';
+  } else if (containerTargets.has(trimmed)) {
+    mode = 'container';
+  } else if (traceTargets.has(trimmed)) {
+    mode = 'trace';
+  } else if (containerAndTraceTargets.has(trimmed)) {
+    mode = 'container_and_trace';
+  } else if (explicitAllTargets.has(trimmed)) {
+    mode = 'all';
+  }
+
+  if (!mode) {
     return appendError(
       state,
       rawCmdLine,
-      `bin-audit: unsupported target or flag '${trimmed}'. Usage: ${TACTICAL_COMMAND_REGISTRY['bin-audit'].usage}`
+      `bin-audit: unsupported or missing target '${trimmed || '(empty)'}'. Usage: ${TACTICAL_COMMAND_REGISTRY['bin-audit'].usage}`
     );
   }
 
-  const analysis = analyzeContainerAndBinary();
-  const reportText = formatForensicReportForTerminal(analysis.report);
-  const eventKey = 'event:tactical:lantern_binary_analyzed';
+  const elfEvent = 'event:tactical:bin_audit_elf';
+  const containerEvent = 'event:tactical:bin_audit_container';
+  const traceEvent = 'event:tactical:bin_audit_trace';
+  const masterEvent = 'event:tactical:lantern_binary_analyzed';
+
+  const addedSubEvents: string[] = [];
+  if (mode === 'elf' || mode === 'all') {
+    addedSubEvents.push(elfEvent);
+  }
+  if (
+    mode === 'container' ||
+    mode === 'container_and_trace' ||
+    mode === 'all'
+  ) {
+    addedSubEvents.push(containerEvent);
+  }
+  if (mode === 'trace' || mode === 'container_and_trace' || mode === 'all') {
+    addedSubEvents.push(traceEvent);
+  }
+
+  const combinedEvents = Array.from(
+    new Set([...state.completedEvents, ...addedSubEvents])
+  );
+
+  const hasElf = combinedEvents.includes(elfEvent);
+  const hasContainer = combinedEvents.includes(containerEvent);
+  const hasTrace = combinedEvents.includes(traceEvent);
+  const allThreeCorrelated = hasElf && hasContainer && hasTrace;
+
+  let reportText = '';
+  if (mode === 'container_and_trace') {
+    const cAnalysis = analyzeContainerAndBinary('container');
+    const tAnalysis = analyzeContainerAndBinary('trace');
+    reportText = `${cAnalysis.report.formattedTelemetry}\n\n${formatForensicReportForTerminal(tAnalysis.report)}`;
+  } else {
+    const analysis = analyzeContainerAndBinary(mode);
+    reportText = formatForensicReportForTerminal(analysis.report);
+  }
+
+  // Partial analysis: not all three artifacts have been examined yet
+  if (!allThreeCorrelated) {
+    const completedStepsCount =
+      (hasElf ? 1 : 0) + (hasContainer ? 1 : 0) + (hasTrace ? 1 : 0);
+    const missingParts: string[] = [];
+    if (!hasElf) missingParts.push('`bin-audit lantern-syncd`');
+    if (!hasContainer)
+      missingParts.push('`bin-audit --container lantern-collector.json`');
+    if (!hasTrace)
+      missingParts.push('`bin-audit --trace lantern-syncd.trace`');
+
+    const partialMsg = `[BIN-AUDIT PARTIAL (${completedStepsCount}/3 ARTIFACTS EXAMINED)] Recorded ${mode.toUpperCase()} findings. To complete correlation and set lantern_binary_analyzed, also run: ${missingParts.join(' and ')} (or \`bin-audit --all\`).`;
+
+    return {
+      ...state,
+      completedEvents: combinedEvents,
+      terminalHistory: [
+        ...state.terminalHistory,
+        makeLine(`eli@greyos:${state.currentDir}$ ${rawCmdLine}`, 'command'),
+        makeLine(reportText, 'output'),
+        makeLine(partialMsg, 'highlight'),
+      ],
+      monologueBanner: partialMsg,
+      lastFeedbackBanner: partialMsg,
+    };
+  }
+
+  // Full correlation achieved: all 3 substeps (ELF, Container, eBPF Trace) have been examined!
   const alreadyAnalyzed =
     state.flags.lantern_binary_analyzed ||
-    state.completedEvents.includes(eventKey);
+    state.completedEvents.includes(masterEvent);
 
   const nextSuspicion = alreadyAnalyzed
     ? state.flags.corporate_suspicion
@@ -664,8 +754,8 @@ function handleBinAudit(
 
   const nextCompletedEvents = Array.from(
     new Set([
-      ...state.completedEvents,
-      eventKey,
+      ...combinedEvents,
+      masterEvent,
       'event:capability_applied:lesson_12_container_binary',
     ])
   );
@@ -677,7 +767,7 @@ function handleBinAudit(
 
   const summaryMsg = alreadyAnalyzed
     ? '[BIN-AUDIT] Static ELF, CIS Docker escape, and eBPF syscall correlation for lantern-syncd is already recorded.'
-    : '[BIN-AUDIT COMPLETE] Correlated ELF symbol `calc_citizen_threat_score`, Privileged Docker mounts (`/var/run/docker.sock`, `/host_etc`), and eBPF `openat("/host_etc/shadow")` syscalls (`lantern_binary_analyzed` | Suspicion -5%, Nadia Trust +10%).';
+    : '[BIN-AUDIT COMPLETE (3/3 CORRELATED)] Correlated ELF symbol `calc_citizen_threat_score`, Privileged Docker mounts (`/var/run/docker.sock`, `/host_etc`), and eBPF `openat("/host_etc/shadow")` syscalls (`lantern_binary_analyzed` | Suspicion -5%, Nadia Trust +10%).';
 
   return {
     ...state,
@@ -779,7 +869,7 @@ export function applyTacticalLessonToStory(
       return executeRegisteredTacticalCommand(
         state,
         'bin-audit',
-        'lantern-syncd'
+        '--all'
       );
   }
 }

@@ -55,7 +55,7 @@ export const JournalModal: React.FC<JournalModalProps> = ({
       titleZh: '已核验规范化 JA4 握手指纹与单端口三次握手遥测 (`captured_tls_0427`)',
       cli: 'ja4-inspect captured_tls_0427',
       summary:
-        'Proved 02:14:11 UTC traffic (t13d0406h2_55b375c5d22e_a19f04c8812b) was a single 42.8s diagnostic handshake, refuting mass-scanner claims.',
+        'Proved 02:14:11 UTC traffic (t13d0406h2_77f0cd3447db_5d4d534e3685) was a single 42.8s diagnostic handshake, refuting mass-scanner claims.',
     },
     {
       flagKey: 'canary_identified',
@@ -83,7 +83,7 @@ export const JournalModal: React.FC<JournalModalProps> = ({
       code: 'LEVEL 12 · CONTAINER & BINARY',
       title: 'Correlated ELF Symbols, Privileged Docker Escape & eBPF Syscalls',
       titleZh: '已联合固定 `lantern-syncd` 威胁评分函数、特权容器配置与 eBPF 越权记录',
-      cli: 'bin-audit lantern-syncd',
+      cli: 'bin-audit --all',
       summary:
         'Verified `calc_citizen_threat_score`, `/var/run/docker.sock` bind mount, and eBPF `openat("/host_etc/shadow")` execution.',
     },

@@ -175,9 +175,9 @@ export const CONTAINER_BINARY_LESSON: LearningLesson = {
     storyApplication: {
       id: 'app_12_bin_audit_lantern',
       targetHostOrFile: 'lantern-syncd',
-      actionLabel: 'Run `bin-audit` on `lantern-syncd`, `lantern-collector.json` & `lantern-syncd.trace`',
-      actionLabelZh: '对 `lantern-syncd`、容器配置与 eBPF 追踪样本执行 `bin-audit` 联合取证',
-      analyticalCommand: 'bin-audit lantern-syncd',
+      actionLabel: 'Run `bin-audit --all` (or inspect ELF, Container & eBPF artifacts) to Correlate Escape Proof',
+      actionLabelZh: '运行 `bin-audit --all`（或逐项审计 ELF、容器配置与 eBPF 追踪样本）执行联合取证',
+      analyticalCommand: 'bin-audit --all',
       bruteForceCommand: './lantern-syncd',
       analyticalOutcome:
         'Correlated ELF symbols (`calc_citizen_threat_score`), privileged Docker mounts (`/var/run/docker.sock`, `/host_etc`), and eBPF `openat("/host_etc/shadow")` syscalls (`lantern_binary_analyzed`, -5% Suspicion, +10% Nadia Trust).',

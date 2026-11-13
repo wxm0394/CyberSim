@@ -1,5 +1,6 @@
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
+import crypto from 'node:crypto';
 import {
   CURRENT_SAVE_VERSION,
   createInitialDeadAirState,
@@ -20,7 +21,17 @@ import {
   toggleWorkstationOverlay,
   transitionToScene,
 } from './storyEngine';
-import { clearDeadAirSave, migrateDeadAirSave } from '../persistence/storage';
+import {
+  clearDeadAirSave,
+  isValidLegacySaveShape,
+  isValidV3SaveShape,
+  LEGACY_STORAGE_KEY_V1,
+  LEGACY_STORAGE_KEY_V2,
+  loadDeadAirState,
+  migrateDeadAirSave,
+  saveDeadAirState,
+  STORAGE_KEY_V3,
+} from '../persistence/storage';
 import {
   applyLessonCapabilityToStory,
   executeLabDiagnosticStep,
@@ -42,9 +53,14 @@ import {
   analyzeHsmAndKeyring,
   analyzePersistenceAndMetadata,
   analyzeTlsFingerprinting,
+  computeCanonicalJa4,
+  sha256Hex,
+  verifyEcdsaP256Sha256,
 } from '../simulation/tacticalEngine';
+import { HSM_FORENSICS_FIXTURES } from '../simulation/tacticalFixtures/hsm.fixtures';
+import { TLS_FINGERPRINT_FIXTURES } from '../simulation/tacticalFixtures/tls.fixtures';
 
-describe('DEAD AIR V0.4 — Narrative Integrity, Workstation Access, Probe Integrity & Tactical Security Engineering', () => {
+describe('DEAD AIR V0.4.1 — Narrative Integrity, Workstation Access, Probe Integrity & Tactical Security Engineering', () => {
   it('1. initializes game state with saveVersion 3, APARTMENT_NIGHT at 02:17 AM, 0 discovered evidence, and 6 false tactical flags', () => {
     const state = createInitialDeadAirState('playing');
     assert.equal(state.saveVersion, 3);
@@ -1097,7 +1113,7 @@ describe('DEAD AIR V0.4 — Narrative Integrity, Workstation Access, Probe Integ
     assert.equal(state.learning.activeLabLessonId, 'lesson_08_persistence');
   });
 
-  it('26. verifies deterministic passive forensics engines (systemd, metadata, JA4 canonical sorting, Canary/Honeypot, PKCS#11 4-layer HSM, ELF/Docker/eBPF)', () => {
+  it('26. computes JA4 dynamically from ClientHello inputs (with GREASE exclusion and known-answer vectors) and verifies ECDSA-P256 signatures cryptographically (with tampered payload and invalid signature negative tests)', () => {
     const p8 = analyzePersistenceAndMetadata();
     assert.equal(
       p8.suspiciousUnit.unitName,
@@ -1108,11 +1124,26 @@ describe('DEAD AIR V0.4 — Narrative Integrity, Workstation Access, Probe Integ
     assert.ok(p8.report.technicalInference.length > 10);
     assert.ok(p8.report.narrativeHypothesis.length > 10);
 
+    // --- JA4 Deterministic Computation & Known-Answer Vectors ---
     const p9 = analyzeTlsFingerprinting();
+    // Independently verify SHA-256 12-char prefixes using node:crypto
+    const expectedEliB = crypto
+      .createHash('sha256')
+      .update('1301,1302,1303,c02f')
+      .digest('hex')
+      .slice(0, 12);
+    const expectedEliC = crypto
+      .createHash('sha256')
+      .update('000a,000d,002b,0033_0403,0804,0401')
+      .digest('hex')
+      .slice(0, 12);
+    assert.equal(expectedEliB, '77f0cd3447db');
+    assert.equal(expectedEliC, '5d4d534e3685');
     assert.equal(
       p9.computedJa4,
-      't13d0406h2_55b375c5d22e_a19f04c8812b'
+      `t13d0406h2_${expectedEliB}_${expectedEliC}`
     );
+    // FoxIO official JA4 specification known-answer test vector
     assert.equal(
       p9.baselineBrowserJa4,
       't13d1516h2_8daaf6152771_e5627efa2ab1'
@@ -1120,37 +1151,158 @@ describe('DEAD AIR V0.4 — Narrative Integrity, Workstation Access, Probe Integ
     assert.notEqual(p9.computedJa4, p9.baselineBrowserJa4);
     assert.equal(p9.isStatelessScan, false);
 
+    // Prove JA4 is computed from input fields, not read from a static string:
+    const rawEli = TLS_FINGERPRINT_FIXTURES.captured_tls_0427_eli_tool;
+    // 1. Adding/changing GREASE values or permuting cipher/extension wire order must NOT change JA4
+    const reorderedWithExtraGrease = analyzeTlsFingerprinting(undefined, {
+      cipherSuitesHex: ['fafa', 'c02f', '1303', '3a3a', '1301', '1302'],
+      extensionsHex: ['baba', '0033', '000a', '002b', '0000', '000d', '0010'],
+    });
+    assert.equal(reorderedWithExtraGrease.computedJa4, p9.computedJa4);
+
+    // 2. Adding a non-GREASE cipher ('009c') MUST change JA4_a cipher count (04 -> 05) and JA4_b hash
+    const withFifthCipher = analyzeTlsFingerprinting(undefined, {
+      cipherSuitesHex: [...rawEli.cipherSuitesHex, '009c'],
+    });
+    assert.match(withFifthCipher.computedJa4, /^t13d0506h2_/);
+    assert.notEqual(
+      withFifthCipher.computedDetails.ja4_b,
+      p9.computedDetails.ja4_b
+    );
+
+    // 3. Reordering signatureAlgorithmsHex MUST change JA4_c (since JA4 preserves sig_alg wire order)
+    const reorderedSigAlgs = analyzeTlsFingerprinting(undefined, {
+      signatureAlgorithmsHex: ['0804', '0403', '0401'],
+    });
+    assert.equal(reorderedSigAlgs.computedDetails.ja4_a, p9.computedDetails.ja4_a);
+    assert.equal(reorderedSigAlgs.computedDetails.ja4_b, p9.computedDetails.ja4_b);
+    assert.notEqual(
+      reorderedSigAlgs.computedDetails.ja4_c,
+      p9.computedDetails.ja4_c
+    );
+
+    // 4. Changing SNI or ALPN MUST change JA4_a
+    const withoutSni = computeCanonicalJa4({
+      ...rawEli,
+      sniPresent: false,
+      sniHostname: '',
+    });
+    assert.equal(withoutSni.ja4_a, 't13i0406h2');
+    const http11Alpn = computeCanonicalJa4({
+      ...rawEli,
+      alpn: 'http/1.1',
+    });
+    assert.equal(http11Alpn.ja4_a, 't13d0406h1');
+
+    // --- Canary & Honeypot ---
     const p10 = analyzeCanaryAndHoneypot();
     assert.equal(p10.canaryTokenId, 'CANARY-VSP-0427-ELI');
     assert.equal(p10.honeypotHost, '10.88.14.9');
     assert.equal(p10.honeypotConfidence, 98);
 
+    // --- Real ECDSA-P256 Cryptographic Verification & Negative Tests ---
+    const hsmFix = HSM_FORENSICS_FIXTURES['access_0427.log'];
+    assert.equal(hsmFix.signatureEnvelopeHex.includes('...'), false);
+    // Cross-check with Node's built-in crypto.verify
+    const nodePubKey = crypto.createPublicKey(hsmFix.publicKeyPem);
+    const nodeVerified = crypto.verify(
+      'sha256',
+      Buffer.from(hsmFix.signedPayloadRaw, 'utf8'),
+      nodePubKey,
+      Buffer.from(hsmFix.signatureEnvelopeHex, 'hex')
+    );
+    assert.equal(nodeVerified, true);
+
     const p11 = analyzeHsmAndKeyring();
     assert.equal(p11.verificationBreakdown.signatureMathValid, true);
+    assert.equal(
+      p11.verificationBreakdown.payloadSha256Hex,
+      sha256Hex(hsmFix.signedPayloadRaw)
+    );
     assert.equal(p11.verificationBreakdown.signingKeyId, 'M_HALE_SEC_01');
     assert.match(
       p11.verificationBreakdown.tokenMetadata,
       /CKF_HW_SLOT=false/
     );
     assert.equal(
+      p11.verificationBreakdown.hardwareAttestationPresent,
+      false
+    );
+    assert.equal(
       p11.verificationBreakdown.hardwareAttestationStatus,
       'MISSING_HARDWARE_ATTESTATION'
+    );
+    assert.match(
+      hsmFix.hardwareAttestationState,
+      /MISSING_HARDWARE_ATTESTATION/
     );
     assert.equal(
       p11.verificationBreakdown.attributedActorInPlaintextLog,
       'e.ward_09'
     );
 
-    const p12 = analyzeContainerAndBinary();
+    // Negative Test 1: Tampered payload MUST fail ECDSA-P256 verification
+    const tamperedPayloadResult = analyzeHsmAndKeyring({
+      signedPayloadRaw:
+        'REACTIVATE_UID=m.hale_01|PURGE_JOB=9904|TS=2028-04-27T02:14:11Z|SLOT=0x02|KEY_ID=M_HALE_SEC_01',
+    });
+    assert.equal(
+      tamperedPayloadResult.verificationBreakdown.signatureMathValid,
+      false
+    );
+    assert.equal(
+      tamperedPayloadResult.report.verificationStatus,
+      'PENDING_CORROBORATION'
+    );
+
+    // Negative Test 2: Invalid / corrupted DER signature MUST fail ECDSA-P256 verification
+    const corruptedSigHex =
+      hsmFix.signatureEnvelopeHex.slice(0, -4) +
+      (hsmFix.signatureEnvelopeHex.endsWith('908b') ? '908c' : '908b');
+    const invalidSigResult = analyzeHsmAndKeyring({
+      signatureEnvelopeHex: corruptedSigHex,
+    });
+    assert.equal(
+      invalidSigResult.verificationBreakdown.signatureMathValid,
+      false
+    );
+    assert.equal(
+      verifyEcdsaP256Sha256(
+        hsmFix.signedPayloadRaw,
+        '3045022100deadbeef',
+        hsmFix.publicKeyUncompressedHex
+      ),
+      false
+    );
+
+    // Negative Test 3: Wrong/corrupted public key MUST fail ECDSA-P256 verification
+    assert.equal(
+      verifyEcdsaP256Sha256(
+        hsmFix.signedPayloadRaw,
+        hsmFix.signatureEnvelopeHex,
+        '04' + '11'.repeat(64)
+      ),
+      false
+    );
+
+    // --- ELF / Docker / eBPF Partial vs All Analysis ---
+    const p12ElfOnly = analyzeContainerAndBinary('elf');
+    assert.ok(p12ElfOnly.suspiciousSymbols.includes('calc_citizen_threat_score'));
+    assert.equal(p12ElfOnly.containerEscapeVectors.length, 0);
+    assert.equal(p12ElfOnly.ebpfBoundaryViolations.length, 0);
+    assert.equal(p12ElfOnly.report.verificationStatus, 'PENDING_CORROBORATION');
+
+    const p12All = analyzeContainerAndBinary('all');
     assert.ok(
-      p12.suspiciousSymbols.includes('calc_citizen_threat_score')
+      p12All.suspiciousSymbols.includes('calc_citizen_threat_score')
     );
     assert.ok(
-      p12.containerEscapeVectors.some((v) => v.includes('docker.sock'))
+      p12All.containerEscapeVectors.some((v) => v.includes('docker.sock'))
     );
     assert.ok(
-      p12.ebpfBoundaryViolations.some((e) => e.includes('/host_etc/shadow'))
+      p12All.ebpfBoundaryViolations.some((e) => e.includes('/host_etc/shadow'))
     );
+    assert.equal(p12All.report.verificationStatus, 'VERIFIED');
   });
 
   it('27. completes Levels 08-12 sequentially, verifies lab completion does not award free suspicion/exposure bonuses, and strictly isolates the 6 tactical flags from evidence_count', () => {
@@ -1240,7 +1392,7 @@ describe('DEAD AIR V0.4 — Narrative Integrity, Workstation Access, Probe Integ
     assert.match(manualText, /TOTAL COMPLETED LABS.*6 \/ 12/);
   });
 
-  it('28. validates all 5 new CLI commands (persist-audit, ja4-inspect, canary-check, hsm-verify, bin-audit): lock checks, independent flags, original file preservation, active honey-trap preservation, and idempotency', () => {
+  it('28. validates all 5 new CLI commands (persist-audit, ja4-inspect, canary-check, hsm-verify, bin-audit): lock checks, partial bin-audit substeps (ELF/container/trace) vs full correlation, and idempotency', () => {
     let state = createInitialDeadAirState('playing');
     state = handleFirstPhoneChoice(state, 'CALL_NADIA'); // suspicion 30, exposure 25
 
@@ -1256,7 +1408,7 @@ describe('DEAD AIR V0.4 — Narrative Integrity, Workstation Access, Probe Integ
       assert.match(state.lastFeedbackBanner || '', /Capability Locked/);
     }
 
-    // Unlock all Track II capabilities via debugMode or lab completion
+    // Unlock all Track II capabilities
     state = {
       ...state,
       learning: {
@@ -1279,12 +1431,10 @@ describe('DEAD AIR V0.4 — Narrative Integrity, Workstation Access, Probe Integ
     };
 
     // 2. Test `persist-audit`:
-    // 2a. `--inspect` does not set either completion flag
     state = executeDeadAirCommand(state, 'persist-audit --inspect');
     assert.equal(state.flags.persistence_audit_completed, false);
     assert.equal(state.flags.metadata_protection_completed, false);
 
-    // 2b. Invalid target returns error without setting flags
     state = executeDeadAirCommand(
       state,
       'persist-audit --quarantine bogus.timer'
@@ -1295,7 +1445,6 @@ describe('DEAD AIR V0.4 — Narrative Integrity, Workstation Access, Probe Integ
       'error'
     );
 
-    // 2c. `--quarantine vespera-Support-sync.timer` sets ONLY `persistence_audit_completed = true` (-5 exposure)
     const expBeforeQ = state.flags.player_exposure;
     state = executeDeadAirCommand(
       state,
@@ -1304,14 +1453,12 @@ describe('DEAD AIR V0.4 — Narrative Integrity, Workstation Access, Probe Integ
     assert.equal(state.flags.persistence_audit_completed, true);
     assert.equal(state.flags.metadata_protection_completed, false);
     assert.equal(state.flags.player_exposure, expBeforeQ - 5);
-    // Repeat quarantine is idempotent
     state = executeDeadAirCommand(
       state,
       'persist-audit --quarantine vespera-Support-sync.timer'
     );
     assert.equal(state.flags.player_exposure, expBeforeQ - 5);
 
-    // 2d. `--sanitize-copy incident_0427_brief.pdf` sets `metadata_protection_completed = true`, creates `.clean.pdf`, and preserves original PDF
     state = executeDeadAirCommand(
       state,
       'persist-audit --sanitize-copy incident_0427_brief.pdf'
@@ -1338,11 +1485,10 @@ describe('DEAD AIR V0.4 — Narrative Integrity, Workstation Access, Probe Integ
     state = executeDeadAirCommand(state, 'ja4-inspect captured_tls_0427');
     assert.equal(state.flags.tls_attribution_verified, true);
     assert.equal(state.flags.corporate_suspicion, suspBeforeJa4 - 5);
-    // Repeat is idempotent
     state = executeDeadAirCommand(state, 'ja4-inspect captured_tls_0427');
     assert.equal(state.flags.corporate_suspicion, suspBeforeJa4 - 5);
 
-    // 4. Test `canary-check` AND verify `10.88.14.9` active honey-trap remains intact if probed!
+    // 4. Test `canary-check` AND verify `10.88.14.9` active honey-trap remains intact if probed
     state = executeDeadAirCommand(state, 'canary-check 192.0.2.99');
     assert.equal(state.flags.canary_identified, false);
     state = executeDeadAirCommand(state, 'canary-check 10.88.14.9');
@@ -1361,68 +1507,192 @@ describe('DEAD AIR V0.4 — Narrative Integrity, Workstation Access, Probe Integ
     state = executeDeadAirCommand(state, 'hsm-verify access_0427.log');
     assert.equal(state.flags.hsm_signature_verified, true);
     assert.equal(state.flags.corporate_suspicion, suspBeforeHsm - 5);
-    // Repeat is idempotent
     state = executeDeadAirCommand(state, 'hsm-verify access_0427.log');
     assert.equal(state.flags.corporate_suspicion, suspBeforeHsm - 5);
 
-    // 6. Test `bin-audit`:
+    // 6. Test `bin-audit` partial substeps vs. full 3-artifact correlation:
+    // 6a. Bare `bin-audit` (no args) or invalid flag is rejected
+    state = executeDeadAirCommand(state, 'bin-audit');
+    assert.equal(state.flags.lantern_binary_analyzed, false);
+    assert.equal(
+      state.terminalHistory[state.terminalHistory.length - 1].tone,
+      'error'
+    );
     state = executeDeadAirCommand(state, 'bin-audit --badflag');
     assert.equal(state.flags.lantern_binary_analyzed, false);
+
+    // 6b. Running only trace analysis on a branch state does NOT prematurely set lantern_binary_analyzed
+    const traceOnlyBranch = executeDeadAirCommand(
+      state,
+      'bin-audit --trace lantern-syncd.trace'
+    );
+    assert.equal(traceOnlyBranch.flags.lantern_binary_analyzed, false);
+    assert.ok(
+      traceOnlyBranch.completedEvents.includes('event:tactical:bin_audit_trace')
+    );
+
     const suspBeforeBin = state.flags.corporate_suspicion;
+    const trustBeforeBin = state.flags.trust_nadia;
+
+    // 6c. Substep 1/3: `bin-audit lantern-syncd` (ELF analysis only) -> does NOT complete LEVEL 12
     state = executeDeadAirCommand(state, 'bin-audit lantern-syncd');
-    assert.equal(state.flags.lantern_binary_analyzed, true);
-    assert.equal(state.flags.corporate_suspicion, suspBeforeBin - 5);
+    assert.equal(state.flags.lantern_binary_analyzed, false);
+    assert.equal(state.flags.corporate_suspicion, suspBeforeBin);
+    assert.equal(state.flags.trust_nadia, trustBeforeBin);
+    assert.equal(
+      state.learning.appliedStoryLessons.includes('lesson_12_container_binary'),
+      false
+    );
+    assert.ok(state.completedEvents.includes('event:tactical:bin_audit_elf'));
+    assert.match(state.lastFeedbackBanner || '', /PARTIAL \(1\/3/);
+
+    // Repeating ELF substep still does not complete LEVEL 12
+    state = executeDeadAirCommand(state, 'bin-audit lantern-syncd');
+    assert.equal(state.flags.lantern_binary_analyzed, false);
+
+    // 6d. Substep 2/3: `bin-audit --container lantern-collector.json` (container analysis only) -> STILL does NOT complete LEVEL 12
     state = executeDeadAirCommand(
       state,
       'bin-audit --container lantern-collector.json'
     );
+    assert.equal(state.flags.lantern_binary_analyzed, false);
+    assert.equal(state.flags.corporate_suspicion, suspBeforeBin);
+    assert.equal(state.flags.trust_nadia, trustBeforeBin);
+    assert.ok(
+      state.completedEvents.includes('event:tactical:bin_audit_container')
+    );
+    assert.match(state.lastFeedbackBanner || '', /PARTIAL \(2\/3/);
+
+    // 6e. Substep 3/3: `bin-audit --trace lantern-syncd.trace` -> all 3 artifacts examined -> completes correlation!
+    state = executeDeadAirCommand(
+      state,
+      'bin-audit --trace lantern-syncd.trace'
+    );
+    assert.equal(state.flags.lantern_binary_analyzed, true);
     assert.equal(state.flags.corporate_suspicion, suspBeforeBin - 5);
+    assert.equal(state.flags.trust_nadia, trustBeforeBin + 10);
+    assert.ok(
+      state.learning.appliedStoryLessons.includes('lesson_12_container_binary')
+    );
+
+    // 6f. Repeating `--trace` or `--all` after completion is strictly idempotent
+    state = executeDeadAirCommand(state, 'bin-audit --all');
+    assert.equal(state.flags.corporate_suspicion, suspBeforeBin - 5);
+    assert.equal(state.flags.trust_nadia, trustBeforeBin + 10);
 
     // 7. Even with all 6 tactical flags true, core Chapter 1 `evidence_count` MUST still be 0!
     assert.equal(state.flags.evidence_count, 0);
   });
 
-  it('29. guarantees GUI applyLessonCapabilityToStory and CLI executeDeadAirCommand produce identical state & flags for Track II lessons', () => {
+  it('29. guarantees GUI applyLessonCapabilityToStory and CLI executeDeadAirCommand (both --all and 3-step sequential) produce identical state & flags for Track II lessons', () => {
     const baseState = createInitialDeadAirState('playing');
     const unlockedState = {
       ...baseState,
       learning: {
         ...baseState.learning,
-        unlockedCapabilities: ['tls_fingerprint_inspector' as const],
-        unlockedTools: ['ja4-inspect'],
+        unlockedCapabilities: [
+          'tls_fingerprint_inspector' as const,
+          'binary_container_analyzer' as const,
+        ],
+        unlockedTools: ['ja4-inspect', 'bin-audit'],
       },
     };
 
-    const viaGui = applyLessonCapabilityToStory(
+    const viaGui9 = applyLessonCapabilityToStory(
       unlockedState,
       'lesson_09_tls_fingerprinting',
       'analytical'
     );
-    const viaCli = executeDeadAirCommand(
+    const viaCli9 = executeDeadAirCommand(
       unlockedState,
       'ja4-inspect captured_tls_0427'
     );
 
-    assert.equal(viaGui.flags.tls_attribution_verified, true);
-    assert.equal(viaCli.flags.tls_attribution_verified, true);
+    assert.equal(viaGui9.flags.tls_attribution_verified, true);
+    assert.equal(viaCli9.flags.tls_attribution_verified, true);
     assert.equal(
-      viaGui.flags.corporate_suspicion,
-      viaCli.flags.corporate_suspicion
+      viaGui9.flags.corporate_suspicion,
+      viaCli9.flags.corporate_suspicion
     );
-    assert.equal(viaGui.flags.trust_nadia, viaCli.flags.trust_nadia);
+    assert.equal(viaGui9.flags.trust_nadia, viaCli9.flags.trust_nadia);
     assert.deepEqual(
-      viaGui.learning.appliedStoryLessons,
-      viaCli.learning.appliedStoryLessons
+      viaGui9.learning.appliedStoryLessons,
+      viaCli9.learning.appliedStoryLessons
     );
+
+    // Compare Level 12 GUI Apply-to-Story vs CLI `bin-audit --all` vs CLI 3-step sequential
+    const viaGui12 = applyLessonCapabilityToStory(
+      unlockedState,
+      'lesson_12_container_binary',
+      'analytical'
+    );
+    const viaCli12All = executeDeadAirCommand(
+      unlockedState,
+      'bin-audit --all'
+    );
+    let viaCli12Seq = executeDeadAirCommand(
+      unlockedState,
+      'bin-audit lantern-syncd'
+    );
+    assert.equal(viaCli12Seq.flags.lantern_binary_analyzed, false);
+    viaCli12Seq = executeDeadAirCommand(
+      viaCli12Seq,
+      'bin-audit --container lantern-collector.json'
+    );
+    assert.equal(viaCli12Seq.flags.lantern_binary_analyzed, false);
+    viaCli12Seq = executeDeadAirCommand(
+      viaCli12Seq,
+      'bin-audit --trace lantern-syncd.trace'
+    );
+
+    assert.equal(viaGui12.flags.lantern_binary_analyzed, true);
+    assert.equal(viaCli12All.flags.lantern_binary_analyzed, true);
+    assert.equal(viaCli12Seq.flags.lantern_binary_analyzed, true);
+    assert.deepEqual(viaGui12.flags, viaCli12All.flags);
+    assert.deepEqual(viaGui12.flags, viaCli12Seq.flags);
+    assert.deepEqual(
+      viaGui12.learning.appliedStoryLessons,
+      viaCli12Seq.learning.appliedStoryLessons
+    );
+    assert.deepEqual(viaGui12.completedEvents, viaCli12Seq.completedEvents);
   });
 
-  it('30. migrates V1 and V2 saves to Save Version 3 (dead_air_save_v3), preserves currentDir, terminalHistory, and clean PDF copies, and is strictly idempotent', () => {
+  it('30. validates V1->V3 and V2->V3 save migrations, valid V3 round-trip, malformed V3/V2 fallback integrity, key precedence, clean PDF & 6 tactical flags preservation, track selector persistence, and idempotency', () => {
+    const v1Save = {
+      shellState: 'playing',
+      currentScene: 'STREET_NIGHT',
+      clockTime: '02:41 AM',
+      flags: {
+        voicemail_played: true,
+        first_choice: 'TRACE_SMS',
+        archive_inspected: true,
+        timeline_correlated: true,
+        laundromat_meeting_done: false,
+        trust_nadia: 62,
+        contacted_moth: false,
+        evidence_count: 2,
+        discovered_lantern: true,
+        corporate_suspicion: 20,
+        journalist_contact: true,
+        player_exposure: 22,
+        discovered_eli_account_reuse: false,
+        current_objective: 'Cross 4th Ave',
+      },
+      evidence: [
+        { id: 'EV-01', discovered: true, correlated: true },
+        { id: 'EV-02', discovered: true, correlated: true },
+      ],
+      files: [],
+      characters: [{ id: 'nadia', trust: 62, currentNodeId: 'nadia_node_1' }],
+      inventory: [{ id: 'item_moth_usb', acquired: false }],
+    };
+
     const v2Save = {
       saveVersion: 2,
       shellState: 'playing',
-      currentScene: 'STREET_NIGHT',
-      unlockedScenes: ['APARTMENT_NIGHT', 'STREET_NIGHT'],
-      clockTime: '02:45 AM',
+      currentScene: 'LAUNDROMAT',
+      unlockedScenes: ['APARTMENT_NIGHT', 'STREET_NIGHT', 'LAUNDROMAT'],
+      clockTime: '02:55 AM',
       currentDir: '/home/eli/Documents',
       terminalHistory: [
         { id: 't-1', text: 'eli@greyos:~$ ls', tone: 'command' },
@@ -1437,9 +1707,9 @@ describe('DEAD AIR V0.4 — Narrative Integrity, Workstation Access, Probe Integ
         archive_inspected: true,
         timeline_correlated: true,
         laundromat_meeting_done: false,
-        trust_nadia: 65,
+        trust_nadia: 70,
         contacted_moth: false,
-        evidence_count: 2,
+        evidence_count: 3,
         discovered_lantern: false,
         corporate_suspicion: 15,
         journalist_contact: true,
@@ -1453,14 +1723,15 @@ describe('DEAD AIR V0.4 — Narrative Integrity, Workstation Access, Probe Integ
         camera_scrubbed: false,
         counter_proof_secured: false,
         compromised_hosts_count: 1,
-        current_objective: 'Head to Laundromat',
+        current_objective: 'Speak with Nadia Park',
       },
       evidence: [
         { id: 'EV-01', discovered: true, correlated: true },
         { id: 'EV-02', discovered: true, correlated: true },
+        { id: 'EV-03', discovered: true, correlated: true },
       ],
       files: [],
-      characters: [{ id: 'nadia', trust: 65, currentNodeId: 'nadia_node_1' }],
+      characters: [{ id: 'nadia', trust: 70, currentNodeId: 'nadia_node_1' }],
       inventory: [{ id: 'item_moth_usb', acquired: false }],
       networkHosts: [
         {
@@ -1487,30 +1758,172 @@ describe('DEAD AIR V0.4 — Narrative Integrity, Workstation Access, Probe Integ
       },
     };
 
-    const migratedOnce = migrateDeadAirSave(v2Save, true);
-    assert.equal(migratedOnce.saveVersion, 3);
-    assert.equal(migratedOnce.currentScene, 'STREET_NIGHT');
-    assert.equal(migratedOnce.currentDir, '/home/eli/Documents');
-    assert.equal(migratedOnce.terminalHistory.length, 1);
-    assert.equal(migratedOnce.flags.evidence_count, 2);
-    assert.equal(migratedOnce.flags.persistence_audit_completed, false);
-    assert.equal(migratedOnce.flags.metadata_protection_completed, false);
-    assert.equal(migratedOnce.flags.tls_attribution_verified, false);
-    assert.equal(migratedOnce.flags.canary_identified, false);
-    assert.equal(migratedOnce.flags.hsm_signature_verified, false);
-    assert.equal(migratedOnce.flags.lantern_binary_analyzed, false);
-    assert.equal(migratedOnce.learning.activeSourceTrack, 'all');
-    assert.deepEqual(migratedOnce.learning.completedLessonIds, [
+    // 1. Full V1 -> V3 migration with new flags defaulting false
+    const migratedFromV1 = migrateDeadAirSave(v1Save, true);
+    assert.equal(migratedFromV1.saveVersion, 3);
+    assert.equal(isValidV3SaveShape(migratedFromV1), true);
+    assert.equal(migratedFromV1.currentScene, 'STREET_NIGHT');
+    assert.equal(migratedFromV1.flags.trust_nadia, 62);
+    assert.equal(migratedFromV1.flags.persistence_audit_completed, false);
+    assert.equal(migratedFromV1.flags.metadata_protection_completed, false);
+    assert.equal(migratedFromV1.flags.tls_attribution_verified, false);
+    assert.equal(migratedFromV1.flags.canary_identified, false);
+    assert.equal(migratedFromV1.flags.hsm_signature_verified, false);
+    assert.equal(migratedFromV1.flags.lantern_binary_analyzed, false);
+    assert.equal(migratedFromV1.learning.activeSourceTrack, 'all');
+
+    // 2. Full V2 -> V3 migration
+    const migratedFromV2 = migrateDeadAirSave(v2Save, true);
+    assert.equal(migratedFromV2.saveVersion, 3);
+    assert.equal(isValidV3SaveShape(migratedFromV2), true);
+    assert.equal(migratedFromV2.currentScene, 'LAUNDROMAT');
+    assert.equal(migratedFromV2.currentDir, '/home/eli/Documents');
+    assert.equal(migratedFromV2.terminalHistory.length, 1);
+    assert.equal(migratedFromV2.flags.evidence_count, 3);
+    assert.equal(migratedFromV2.flags.persistence_audit_completed, false);
+    assert.equal(migratedFromV2.flags.metadata_protection_completed, false);
+    assert.equal(migratedFromV2.flags.tls_attribution_verified, false);
+    assert.equal(migratedFromV2.flags.canary_identified, false);
+    assert.equal(migratedFromV2.flags.hsm_signature_verified, false);
+    assert.equal(migratedFromV2.flags.lantern_binary_analyzed, false);
+    assert.deepEqual(migratedFromV2.learning.completedLessonIds, [
       'lesson_02_dns',
       'lesson_07_osint_opsec',
     ]);
 
-    // Migrating a second time MUST be 100% idempotent
+    // 3. Idempotent migration
     const migratedTwice = migrateDeadAirSave(
-      JSON.parse(JSON.stringify(migratedOnce)),
+      JSON.parse(JSON.stringify(migratedFromV2)),
       true
     );
-    assert.deepEqual(migratedTwice, migratedOnce);
+    assert.deepEqual(migratedTwice, migratedFromV2);
+
+    // Set up a mock window.localStorage to test end-to-end storage precedence & fallback integrity
+    const store = new Map<string, string>();
+    const prevWindow = (globalThis as unknown as { window?: unknown }).window;
+    (globalThis as unknown as { window: unknown }).window = {
+      location: { search: '?autostart=1' },
+      localStorage: {
+        getItem: (k: string) => (store.has(k) ? store.get(k)! : null),
+        setItem: (k: string, v: string) => {
+          store.set(k, String(v));
+        },
+        removeItem: (k: string) => {
+          store.delete(k);
+        },
+      },
+    };
+
+    try {
+      // 4. Existing valid V3 round-trip + Clean PDF dynamic file preservation + 6 tactical flags + Track selector persistence
+      let v3State = createInitialDeadAirState('playing');
+      v3State = selectLearningSourceTrack(v3State, 'tactical_security');
+      v3State = {
+        ...v3State,
+        currentDir: '/home/eli/Documents',
+        learning: {
+          ...v3State.learning,
+          unlockedCapabilities: ['persistence_auditor'],
+          unlockedTools: ['persist-audit'],
+        },
+      };
+      v3State = executeDeadAirCommand(v3State, 'persist-audit --all');
+      v3State = {
+        ...v3State,
+        flags: {
+          ...v3State.flags,
+          persistence_audit_completed: true,
+          metadata_protection_completed: true,
+          tls_attribution_verified: true,
+          canary_identified: true,
+          hsm_signature_verified: true,
+          lantern_binary_analyzed: true,
+        },
+      };
+      saveDeadAirState(v3State);
+      const loadedV3 = loadDeadAirState();
+      assert.equal(loadedV3.saveVersion, 3);
+      assert.equal(loadedV3.learning.activeSourceTrack, 'tactical_security');
+      assert.equal(loadedV3.flags.persistence_audit_completed, true);
+      assert.equal(loadedV3.flags.metadata_protection_completed, true);
+      assert.equal(loadedV3.flags.tls_attribution_verified, true);
+      assert.equal(loadedV3.flags.canary_identified, true);
+      assert.equal(loadedV3.flags.hsm_signature_verified, true);
+      assert.equal(loadedV3.flags.lantern_binary_analyzed, true);
+      assert.ok(
+        loadedV3.files.some(
+          (f) => f.path === '/home/eli/Documents/incident_0427_brief.clean.pdf'
+        )
+      );
+
+      // 5. LocalStorage key precedence: valid V3 takes precedence over V2 and V1
+      store.set(LEGACY_STORAGE_KEY_V2, JSON.stringify(v2Save));
+      store.set(LEGACY_STORAGE_KEY_V1, JSON.stringify(v1Save));
+      const loadedPrecedence = loadDeadAirState();
+      assert.equal(loadedPrecedence.flags.lantern_binary_analyzed, true);
+      assert.equal(loadedPrecedence.currentScene, 'APARTMENT_NIGHT');
+
+      // 6. Malformed/incomplete V3 (containing a `flags` property!) with valid V2 backup:
+      // Must NOT return an empty initial state; must continue to V2, migrate V2 -> V3, and write valid V3!
+      store.clear();
+      const malformedV3WithFlags = JSON.stringify({
+        saveVersion: 3,
+        flags: { trust_nadia: 99 },
+      });
+      assert.equal(isValidV3SaveShape(JSON.parse(malformedV3WithFlags)), false);
+      store.set(STORAGE_KEY_V3, malformedV3WithFlags);
+      store.set(LEGACY_STORAGE_KEY_V2, JSON.stringify(v2Save));
+
+      const recoveredFromV2 = loadDeadAirState();
+      assert.equal(recoveredFromV2.currentScene, 'LAUNDROMAT');
+      assert.equal(recoveredFromV2.flags.trust_nadia, 70);
+      assert.equal(recoveredFromV2.flags.evidence_count, 3);
+      // V2 backup is preserved and V3 is updated with the valid migrated V3 save
+      assert.ok(store.get(LEGACY_STORAGE_KEY_V2));
+      assert.equal(
+        isValidV3SaveShape(JSON.parse(store.get(STORAGE_KEY_V3)!)),
+        true
+      );
+
+      // 7. Malformed V3 AND malformed V2 (both containing `flags`!) with valid V1 backup:
+      // Must continue past V3 and V2, migrate V1 -> V3, preserve V1 & V2, and write V3 after migration!
+      store.clear();
+      const malformedV2WithFlags = JSON.stringify({
+        saveVersion: 2,
+        flags: { trust_nadia: 10 },
+      });
+      assert.equal(
+        isValidLegacySaveShape(JSON.parse(malformedV2WithFlags)),
+        false
+      );
+      store.set(STORAGE_KEY_V3, malformedV3WithFlags);
+      store.set(LEGACY_STORAGE_KEY_V2, malformedV2WithFlags);
+      store.set(LEGACY_STORAGE_KEY_V1, JSON.stringify(v1Save));
+
+      const recoveredFromV1 = loadDeadAirState();
+      assert.equal(recoveredFromV1.currentScene, 'STREET_NIGHT');
+      assert.equal(recoveredFromV1.flags.trust_nadia, 62);
+      assert.equal(recoveredFromV1.flags.first_choice, 'TRACE_SMS');
+      assert.equal(store.get(LEGACY_STORAGE_KEY_V2), malformedV2WithFlags);
+      assert.ok(store.get(LEGACY_STORAGE_KEY_V1));
+      assert.equal(
+        isValidV3SaveShape(JSON.parse(store.get(STORAGE_KEY_V3)!)),
+        true
+      );
+
+      // 8. When V3 is malformed and no valid legacy save exists, V3 is preserved in localStorage (not overwritten with empty state)
+      store.clear();
+      store.set(STORAGE_KEY_V3, malformedV3WithFlags);
+      const fallbackInitial = loadDeadAirState();
+      assert.equal(fallbackInitial.currentScene, 'APARTMENT_NIGHT');
+      assert.equal(store.get(STORAGE_KEY_V3), malformedV3WithFlags);
+    } finally {
+      if (prevWindow === undefined) {
+        delete (globalThis as unknown as { window?: unknown }).window;
+      } else {
+        (globalThis as unknown as { window: unknown }).window = prevWindow;
+      }
+    }
   });
 });
 

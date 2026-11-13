@@ -3,12 +3,34 @@ import {
   SystemdUnitFixture,
 } from './tacticalFixtures/persistence.fixtures';
 import { METADATA_FIXTURES } from './tacticalFixtures/metadata.fixtures';
-import { TLS_FINGERPRINT_FIXTURES } from './tacticalFixtures/tls.fixtures';
+import {
+  TLS_FINGERPRINT_FIXTURES,
+  TlsClientHelloFixture,
+} from './tacticalFixtures/tls.fixtures';
 import { CANARY_HONEYPOT_FIXTURES } from './tacticalFixtures/canary.fixtures';
-import { HSM_FORENSICS_FIXTURES } from './tacticalFixtures/hsm.fixtures';
+import {
+  HSM_FORENSICS_FIXTURES,
+  Pkcs11SlotFixture,
+} from './tacticalFixtures/hsm.fixtures';
 import { BINARY_FIXTURES } from './tacticalFixtures/binary.fixtures';
 import { CONTAINER_FIXTURES } from './tacticalFixtures/container.fixtures';
 import { EBPF_FIXTURES } from './tacticalFixtures/ebpf.fixtures';
+import {
+  computeCanonicalJa4,
+  isGreaseHex,
+  Ja4ClientHelloInput,
+  Ja4ComputationResult,
+  sha256Hex,
+  verifyEcdsaP256Sha256,
+} from './cryptoPrimitives';
+
+export {
+  computeCanonicalJa4,
+  isGreaseHex,
+  sha256Hex,
+  verifyEcdsaP256Sha256,
+};
+export type { Ja4ClientHelloInput, Ja4ComputationResult };
 
 export interface ForensicFindingReport {
   findingId: string;
@@ -88,7 +110,8 @@ export function analyzePersistenceAndMetadata(): PersistenceAnalysisResult {
     narrativeHypothesisZh:
       '叙事假设：Vespera 旧运维镜像在 Eli 电脑中留有后门钩子，向记者 Rhea 传递材料前必须隔离该服务并生成脱敏副本。',
     confidence: 'HIGH (Deterministic Match)',
-    relatedStoryEvent: 'Chapter 1 Workstation Hardening & Media Dead-Drop Protection',
+    relatedStoryEvent:
+      'Chapter 1 Workstation Hardening & Media Dead-Drop Protection',
     verificationStatus: 'VERIFIED',
     formattedTelemetry,
   };
@@ -102,36 +125,46 @@ export function analyzePersistenceAndMetadata(): PersistenceAnalysisResult {
 
 export interface TlsAnalysisResult {
   computedJa4: string;
+  computedDetails: Ja4ComputationResult;
   baselineBrowserJa4: string;
+  baselineDetails: Ja4ComputationResult;
   isStatelessScan: boolean;
   report: ForensicFindingReport;
 }
 
-export function analyzeTlsFingerprinting(captureArg?: string): TlsAnalysisResult {
-  const eliCapture = TLS_FINGERPRINT_FIXTURES.captured_tls_0427_eli_tool;
+export function analyzeTlsFingerprinting(
+  captureArg?: string,
+  customClientHello?: Partial<TlsClientHelloFixture>
+): TlsAnalysisResult {
+  const eliCapture: TlsClientHelloFixture = {
+    ...TLS_FINGERPRINT_FIXTURES.captured_tls_0427_eli_tool,
+    ...customClientHello,
+  };
   const baseline = TLS_FINGERPRINT_FIXTURES.captured_tls_0427_standard_browser;
 
-  const sortedEliCiphers = [...eliCapture.cipherSuitesHex].sort().join(',');
-  const sortedBaselineCiphers = [...baseline.cipherSuitesHex].sort().join(',');
+  // Dynamically compute both JA4 fingerprints from raw wire-order ClientHello fields
+  const eliComputed = computeCanonicalJa4(eliCapture);
+  const baselineComputed = computeCanonicalJa4(baseline);
 
   const formattedTelemetry = [
     `[PASSIVE TLS CLIENTHELLO & JA4 ATTRIBUTION — ${eliCapture.fixtureId}]`,
     `  Capture Source : ${captureArg || eliCapture.captureId} (${eliCapture.sourceIp} -> ${eliCapture.destinationIp}:${eliCapture.destinationPort})`,
     `  Profile A      : ${eliCapture.profileName}`,
-    `    Ciphers (Sorted Hex) : [${sortedEliCiphers}] (count=04, SNI=d, ALPN=${eliCapture.alpn})`,
+    `    Ciphers (Sorted Hex, GREASE Removed) : [${eliComputed.sortedCiphersCsv}] (count=${String(eliComputed.nonGreaseCiphers.length).padStart(2, '0')}, SNI=${eliComputed.ja4_a[3]}, ALPN=${eliCapture.alpn || '00'})`,
+    `    Extensions (Hashed, GREASE/SNI/ALPN Excl.) : [${eliComputed.sortedExtensionsForHash.join(',')}] (total non-GREASE=${String(eliComputed.nonGreaseExtensionsCount).padStart(2, '0')})`,
     `    JA3 Hash             : ${eliCapture.ja3Hash}`,
-    `    JA4 Fingerprint      : ${eliCapture.ja4Fingerprint}`,
+    `    Computed JA4         : ${eliComputed.ja4}`,
     `    Connection Telemetry : ${eliCapture.tcpScanStateSummary}`,
     `  Profile B      : ${baseline.profileName}`,
-    `    Ciphers (Sorted Hex) : [${sortedBaselineCiphers.slice(0, 44)}...] (count=15)`,
-    `    JA4 Fingerprint      : ${baseline.ja4Fingerprint}`,
+    `    Ciphers (Sorted Hex) : [${baselineComputed.sortedCiphersCsv.slice(0, 44)}...] (count=${String(baselineComputed.nonGreaseCiphers.length).padStart(2, '0')})`,
+    `    Computed JA4         : ${baselineComputed.ja4}`,
   ].join('\n');
 
   const report: ForensicFindingReport = {
     findingId: 'FND-09-TLS-JA4',
     sourceArtifact: eliCapture.captureId,
-    observedFact: `Captured ClientHello from 10.0.2.15 presents 4 cipher suites and 6 extensions, producing canonical JA4 fingerprint ${eliCapture.ja4Fingerprint} over a completed 3-way TCP handshake.`,
-    observedFactZh: `观察事实：10.0.2.15 发出的 ClientHello 包含 4 个加密套件与 6 个扩展，计算出的标准 JA4 指纹为 ${eliCapture.ja4Fingerprint}，且为完整三次握手连接。`,
+    observedFact: `Captured ClientHello from ${eliCapture.sourceIp} presents ${eliComputed.nonGreaseCiphers.length} non-GREASE cipher suites and ${eliComputed.nonGreaseExtensionsCount} non-GREASE extensions, dynamically computing canonical JA4 fingerprint ${eliComputed.ja4} over a completed 3-way TCP handshake.`,
+    observedFactZh: `观察事实：${eliCapture.sourceIp} 发出的 ClientHello 包含 ${eliComputed.nonGreaseCiphers.length} 个非 GREASE 加密套件与 ${eliComputed.nonGreaseExtensionsCount} 个非 GREASE 扩展，动态计算出的标准 JA4 指纹为 ${eliComputed.ja4}，且为完整三次握手连接。`,
     technicalInference:
       'Even over encrypted TLS 1.3, the unencrypted ClientHello structure uniquely matches a single diagnostic CLI session rather than a browser or stateless SYN scanner.',
     technicalInferenceZh:
@@ -147,8 +180,10 @@ export function analyzeTlsFingerprinting(captureArg?: string): TlsAnalysisResult
   };
 
   return {
-    computedJa4: eliCapture.ja4Fingerprint,
-    baselineBrowserJa4: baseline.ja4Fingerprint,
+    computedJa4: eliComputed.ja4,
+    computedDetails: eliComputed,
+    baselineBrowserJa4: baselineComputed.ja4,
+    baselineDetails: baselineComputed,
     isStatelessScan: false,
     report,
   };
@@ -224,10 +259,14 @@ export function analyzeCanaryAndHoneypot(
 
 export interface HsmVerificationBreakdown {
   signatureMathValid: boolean;
+  payloadSha256Hex: string;
   signingKeyId: string;
   keyOwner: string;
   tokenMetadata: string;
-  hardwareAttestationStatus: string;
+  hardwareAttestationPresent: boolean;
+  hardwareAttestationStatus:
+    | 'MISSING_HARDWARE_ATTESTATION'
+    | 'VERIFIED_HARDWARE_ATTESTATION';
   attributedActorInPlaintextLog: string;
 }
 
@@ -236,22 +275,45 @@ export interface HsmAnalysisResult {
   report: ForensicFindingReport;
 }
 
-export function analyzeHsmAndKeyring(): HsmAnalysisResult {
-  const hsm = HSM_FORENSICS_FIXTURES['access_0427.log'];
+export function analyzeHsmAndKeyring(
+  customFixture?: Partial<Pkcs11SlotFixture>
+): HsmAnalysisResult {
+  const hsm: Pkcs11SlotFixture = {
+    ...HSM_FORENSICS_FIXTURES['access_0427.log'],
+    ...customFixture,
+  };
+
+  // Perform real cryptographic ECDSA-P256 verification over the exact payload and public key
+  const signatureMathValid = verifyEcdsaP256Sha256(
+    hsm.signedPayloadRaw,
+    hsm.signatureEnvelopeHex,
+    hsm.publicKeyUncompressedHex
+  );
+  const payloadSha256Hex = sha256Hex(hsm.signedPayloadRaw);
+  const tokenMetadata = `${hsm.tokenModel} (CKF_HW_SLOT=${hsm.ckfHwSlot})`;
+  const hardwareAttestationStatus = hsm.hardwareAttestationPresent
+    ? 'VERIFIED_HARDWARE_ATTESTATION'
+    : 'MISSING_HARDWARE_ATTESTATION';
 
   const formattedTelemetry = [
     `[PKCS#11 SIGNATURE & KEY SLOT VERIFICATION — ${hsm.fixtureId}]`,
     `  Slot / Token          : ${hsm.slotId} (${hsm.tokenLabel})`,
-    `  Key Identifier Label  : ${hsm.keyIdLabel}`,
+    `  Token Slot Metadata   : ${tokenMetadata}`,
+    `  Key Identifier Label  : ${hsm.keyIdLabel} (Note: label alone does not prove device identity)`,
     `  Algorithm             : ${hsm.algorithm}`,
     `  Verified Public Key   : ${hsm.publicKeyFingerprint}`,
-    `  Signed Audit Payload  : ${hsm.signedPayloadDigest}`,
+    `  Exact Signed Payload  : "${hsm.signedPayloadRaw}"`,
+    `  Payload SHA-256       : ${payloadSha256Hex}`,
+    `  DER Signature (Hex)   : ${hsm.signatureEnvelopeHex}`,
     `  Cryptographic Verify  : ${
-      hsm.signatureValid ? 'VALID (Mathematical ECDSA-P256 Match)' : 'INVALID'
+      signatureMathValid
+        ? 'VALID (Cryptographic ECDSA-P256 Verification Passed)'
+        : 'INVALID (ECDSA-P256 Signature Verification Failed)'
     }`,
+    `  Hardware Attestation  : ${hardwareAttestationStatus}`,
     `  Timestamp             : ${hsm.timestampUtc}`,
     '',
-    `[EVIDENTIARY BOUNDARY — SIGNATURE vs. KEY ID vs. HARDWARE ATTESTATION]`,
+    `[EVIDENTIARY BOUNDARY — SIGNATURE vs. KEY ID vs. TOKEN METADATA vs. ATTESTATION]`,
     `  ${hsm.hardwareAttestationState}`,
     '',
     `[CREDENTIAL EXPOSURE & ROTATION LEDGER]`,
@@ -261,30 +323,34 @@ export function analyzeHsmAndKeyring(): HsmAnalysisResult {
   const report: ForensicFindingReport = {
     findingId: 'FND-11-PKCS11-SIG',
     sourceArtifact: 'access_0427.log & kern_keyring.log',
-    observedFact: `Log purge #9904 and the reactivation of e.ward_09 carry a mathematically valid ECDSA-P256 signature verifiable under public key ${hsm.publicKeyFingerprint} (Key ID: ${hsm.keyIdLabel}).`,
-    observedFactZh: `观察事实：#9904 日志清洗与 e.ward_09 重激活记录带有有效的 ECDSA-P256 数字签名，可通过公钥 ${hsm.publicKeyFingerprint}（密钥标识 ${hsm.keyIdLabel}）验签。`,
+    observedFact: `Log purge #9904 and the reactivation of ${hsm.plaintextAttributedActor} carry an ECDSA-P256 signature (${signatureMathValid ? 'VALID' : 'INVALID'}) verified against public key ${hsm.publicKeyFingerprint} (Key ID: ${hsm.keyIdLabel}), generated on ${tokenMetadata} with ${hardwareAttestationStatus}.`,
+    observedFactZh: `观察事实：#9904 日志清洗与 ${hsm.plaintextAttributedActor} 重激活记录带有 ECDSA-P256 数字签名（验签结果：${signatureMathValid ? '有效' : '无效'}），对应公钥 ${hsm.publicKeyFingerprint}（密钥标识 ${hsm.keyIdLabel}），生成于软令牌 ${tokenMetadata} 且硬件证明状态为 ${hardwareAttestationStatus}。`,
     technicalInference:
-      'Separating mathematical signature validity, Key ID (M_HALE_SEC_01), soft-token slot metadata (CKF_HW_SLOT=false), and hardware attestation confirms Marcus Hale’s key signed the batch via an un-attested software emulator while splicing e.ward_09 into the plaintext log.',
+      'Separating (1) mathematical signature validity, (2) Key ID (M_HALE_SEC_01), (3) soft-token slot metadata (CKF_HW_SLOT=false), and (4) missing hardware attestation confirms that the private key registered to Marcus Hale signed the batch via an un-attested software emulator while splicing e.ward_09 into the plaintext log.',
     technicalInferenceZh:
-      '技术推论：区分签名数学有效性、密钥 ID (M_HALE_SEC_01)、软令牌元数据 (CKF_HW_SLOT=false) 与缺失的硬件证明后，证实有人使用 Marcus Hale 的密钥通过软模拟器签署指令并在明文日志中栽赃 e.ward_09。',
+      '技术推论：严格区分 (1) 签名数学有效性、(2) 密钥 ID (M_HALE_SEC_01)、(3) 软令牌元数据 (CKF_HW_SLOT=false) 与 (4) 缺失的物理硬件证明后，证实有人使用归属 Marcus Hale 公钥的私钥通过软模拟器签署指令，同时在明文日志中嫁接栽赃 e.ward_09。',
     narrativeHypothesis:
-      'Eli’s revoked account e.ward_09 was framed using Marcus Hale’s executive signing key to cover up the Project LANTERN purge.',
+      'Eli’s revoked account e.ward_09 was framed using Marcus Hale’s executive signing key mounted in an ephemeral SoftHSM slot to cover up the Project LANTERN purge.',
     narrativeHypothesisZh:
-      '叙事假设：有人动用归属 Marcus Hale 安全槽位的签名密钥伪造了 e.ward_09 的清洗授权。',
+      '叙事假设：有人将归属安全总监 Marcus Hale 的签名私钥挂载至临时软令牌槽位，伪造了 e.ward_09 的清洗授权。',
     confidence: 'HIGH (Deterministic Match)',
     relatedStoryEvent: 'Exoneration Proof for e.ward_09 Account Reuse',
-    verificationStatus: 'VERIFIED',
+    verificationStatus: signatureMathValid
+      ? 'VERIFIED'
+      : 'PENDING_CORROBORATION',
     formattedTelemetry,
   };
 
   return {
     verificationBreakdown: {
-      signatureMathValid: true,
+      signatureMathValid,
+      payloadSha256Hex,
       signingKeyId: hsm.keyIdLabel,
-      keyOwner: 'Director Marcus Hale',
-      tokenMetadata: 'SoftHSM-Emulator v2.6 (CKF_HW_SLOT=false)',
-      hardwareAttestationStatus: 'MISSING_HARDWARE_ATTESTATION',
-      attributedActorInPlaintextLog: 'e.ward_09',
+      keyOwner: hsm.keyOwner,
+      tokenMetadata,
+      hardwareAttestationPresent: hsm.hardwareAttestationPresent,
+      hardwareAttestationStatus,
+      attributedActorInPlaintextLog: hsm.plaintextAttributedActor,
     },
     report,
   };
@@ -293,6 +359,7 @@ export function analyzeHsmAndKeyring(): HsmAnalysisResult {
 export const analyzeHsmSignatureAndSecrets = analyzeHsmAndKeyring;
 
 export interface ContainerBinaryAnalysisResult {
+  mode: 'all' | 'elf' | 'container' | 'trace';
   suspiciousSymbols: string[];
   containerEscapeVectors: string[];
   ebpfBoundaryViolations: string[];
@@ -335,11 +402,32 @@ export function analyzeContainerAndBinary(
     );
   }
 
+  const sourceArtifactByMode: Record<
+    'all' | 'elf' | 'container' | 'trace',
+    string
+  > = {
+    elf: 'lantern-syncd (ELF 64-bit)',
+    container: 'lantern-collector.json (CIS Docker Manifest)',
+    trace: 'lantern-syncd.trace (Pre-recorded eBPF Syscalls)',
+    all: 'lantern-syncd, lantern-collector.json & lantern-syncd.trace',
+  };
+
+  const observedFactByMode: Record<
+    'all' | 'elf' | 'container' | 'trace',
+    string
+  > = {
+    elf: 'ELF binary lantern-syncd disables PIE/Canary and exports calc_citizen_threat_score @ 0x00402190 and mount_host_shadow_Copy with hardcoded "/host_etc/shadow" and "/var/run/docker.sock" strings.',
+    container:
+      'Docker manifest lantern-collector.json configures Privileged=true, PidMode="host", CAP_SYS_ADMIN, and bind mounts /var/run/docker.sock and /etc:/host_etc:ro.',
+    trace:
+      'Pre-recorded eBPF trace lantern-syncd.trace records PID 4812 invoking openat("/host_etc/shadow", O_RDONLY) = 7 and connect("/var/run/docker.sock") = 0.',
+    all: 'ELF binary lantern-syncd contains function calc_citizen_threat_score @ 0x00402190, runs in a privileged container mounting /var/run/docker.sock and /etc:/host_etc:ro, and executed openat("/host_etc/shadow") in eBPF telemetry.',
+  };
+
   const report: ForensicFindingReport = {
     findingId: 'FND-12-ELF-CONTAINER',
-    sourceArtifact: 'lantern-syncd, lantern-collector.json & lantern-syncd.trace',
-    observedFact:
-      'ELF binary lantern-syncd contains function calc_citizen_threat_score @ 0x00402190, runs in a privileged container mounting /var/run/docker.sock and /etc:/host_etc:ro, and executed openat("/host_etc/shadow") in eBPF telemetry.',
+    sourceArtifact: sourceArtifactByMode[mode],
+    observedFact: observedFactByMode[mode],
     observedFactZh:
       '观察事实：ELF 样本 lantern-syncd 含有函数 calc_citizen_threat_score @ 0x00402190，其容器以 Privileged=true 挂载了 /var/run/docker.sock，并在 eBPF 记录中跨边界读取宿主机敏感文件。',
     technicalInference:
@@ -351,28 +439,39 @@ export function analyzeContainerAndBinary(
     narrativeHypothesisZh:
       '叙事假设：“灯塔计划”是一套具备宿主机特权逃逸能力的自动化公民风险评分与租户清退系统。',
     confidence: 'HIGH (Deterministic Match)',
-    relatedStoryEvent: 'Project LANTERN Algorithmic Scoring & Container Escape Proof',
-    verificationStatus: 'VERIFIED',
+    relatedStoryEvent:
+      'Project LANTERN Algorithmic Scoring & Container Escape Proof',
+    verificationStatus: mode === 'all' ? 'VERIFIED' : 'PENDING_CORROBORATION',
     formattedTelemetry: parts.join('\n\n'),
   };
 
   return {
-    suspiciousSymbols: [
-      'calc_citizen_threat_score',
-      'mount_host_shadow_Copy',
-      ...elf.criticalFunctions.map((fn) => fn.name),
-    ],
-    containerEscapeVectors: [
-      'Privileged: true',
-      '/var/run/docker.sock bind mount',
-      '/etc:/host_etc:ro bind mount',
-      ...container.cisFindings,
-    ],
-    ebpfBoundaryViolations: [
-      'openat("/host_etc/shadow")',
-      'connect("/var/run/docker.sock")',
-      ...trace.events.map((e) => `${e.syscall}(${e.argsSummary})`),
-    ],
+    mode,
+    suspiciousSymbols:
+      mode === 'all' || mode === 'elf'
+        ? [
+            'calc_citizen_threat_score',
+            'mount_host_shadow_Copy',
+            ...elf.criticalFunctions.map((fn) => fn.name),
+          ]
+        : [],
+    containerEscapeVectors:
+      mode === 'all' || mode === 'container'
+        ? [
+            'Privileged: true',
+            '/var/run/docker.sock bind mount',
+            '/etc:/host_etc:ro bind mount',
+            ...container.cisFindings,
+          ]
+        : [],
+    ebpfBoundaryViolations:
+      mode === 'all' || mode === 'trace'
+        ? [
+            'openat("/host_etc/shadow")',
+            'connect("/var/run/docker.sock")',
+            ...trace.events.map((e) => `${e.syscall}(${e.argsSummary})`),
+          ]
+        : [],
     report,
   };
 }

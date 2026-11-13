@@ -536,8 +536,28 @@ function handleHsmVerify(
   rawArgs: string,
   rawCmdLine: string
 ): DeadAirState {
-  const trimmed = rawArgs
-    .trim()
+  let workingArgs = rawArgs.trim();
+  let customSigHex: string | undefined;
+  let customPayload: string | undefined;
+  let customPubKeyHex: string | undefined;
+
+  const sigMatch = workingArgs.match(/--sig(?:nature)?\s+(\S+)/);
+  if (sigMatch) {
+    customSigHex = sigMatch[1];
+    workingArgs = workingArgs.replace(sigMatch[0], '').trim();
+  }
+  const pubMatch = workingArgs.match(/--pubkey\s+(\S+)/);
+  if (pubMatch) {
+    customPubKeyHex = pubMatch[1];
+    workingArgs = workingArgs.replace(pubMatch[0], '').trim();
+  }
+  const payloadMatch = workingArgs.match(/--payload\s+(\S+)/);
+  if (payloadMatch) {
+    customPayload = payloadMatch[1];
+    workingArgs = workingArgs.replace(payloadMatch[0], '').trim();
+  }
+
+  const trimmed = workingArgs
     .replace(/^--inspect-slot\s+0x02\s+--artifact\s+/, '')
     .replace(/^--keyring-timeline\s+/, '')
     .trim();
@@ -557,16 +577,52 @@ function handleHsmVerify(
     );
   }
 
-  const analysis = analyzeHsmAndKeyring();
+  const customOverrides = {
+    ...(customSigHex !== undefined ? { signatureEnvelopeHex: customSigHex } : {}),
+    ...(customPayload !== undefined ? { signedPayloadRaw: customPayload } : {}),
+    ...(customPubKeyHex !== undefined
+      ? { publicKeyUncompressedHex: customPubKeyHex }
+      : {}),
+  };
+
+  const analysis = analyzeHsmAndKeyring(
+    Object.keys(customOverrides).length > 0 ? customOverrides : undefined
+  );
   const reportText = formatForensicReportForTerminal(analysis.report);
+  const mathValid = analysis.verificationBreakdown.signatureMathValid;
   const breakdownLines = [
-    '--- PKCS#11 FOUR-LAYER CRYPTOGRAPHIC BREAKDOWN ---',
-    `  1. Signature Math       : ${analysis.verificationBreakdown.signatureMathValid ? 'VALID (ECDSA-P256 verified against public key)' : 'INVALID'}`,
-    `  2. Signing Key ID       : ${analysis.verificationBreakdown.signingKeyId} (${analysis.verificationBreakdown.keyOwner})`,
+    '--- PKCS#11 EVIDENTIARY ATTRIBUTION BREAKDOWN ---',
+    `  1. Cryptographic Fact   : ${
+      mathValid
+        ? 'VALID (ECDSA-P256 signature validates against fixture public key)'
+        : 'INVALID (ECDSA-P256 signature verification FAILED against fixture public key)'
+    }`,
+    `  2. Fixture Metadata     : Key label ${analysis.verificationBreakdown.signingKeyId} (owner metadata: ${analysis.verificationBreakdown.keyOwner})`,
     `  3. Token Slot Metadata  : ${analysis.verificationBreakdown.tokenMetadata}`,
-    `  4. Hardware Attestation : ${analysis.verificationBreakdown.hardwareAttestationStatus}`,
-    `  5. Plaintext Log Splice : ${analysis.verificationBreakdown.attributedActorInPlaintextLog} (Framing Mismatch Confirmed)`,
+    `  4. Hardware Attestation : ${analysis.verificationBreakdown.hardwareAttestationStatus} (missing)`,
+    `  5. Real-World Custody   : Not independently established by cryptographic verification alone`,
+    `  6. Plaintext Log Splice : ${analysis.verificationBreakdown.attributedActorInPlaintextLog} (${
+      mathValid
+        ? 'Fictional narrative hypothesis: plaintext actor splice vs. M_HALE_SEC_01 slot signature'
+        : 'Unverified — cryptographic signature check failed'
+    })`,
   ].join('\n');
+
+  if (!mathValid) {
+    const failMsg =
+      '[HSM-VERIFY FAILED] Cryptographic ECDSA-P256 signature verification failed against the fixture public key. The signature or payload is invalid/tampered — hsm_signature_verified was NOT set and no suspicion or trust changes were applied.';
+    return {
+      ...state,
+      terminalHistory: [
+        ...state.terminalHistory,
+        makeLine(`eli@greyos:${state.currentDir}$ ${rawCmdLine}`, 'command'),
+        makeLine(`${reportText}\n\n${breakdownLines}`, 'output'),
+        makeLine(failMsg, 'error'),
+      ],
+      monologueBanner: failMsg,
+      lastFeedbackBanner: failMsg,
+    };
+  }
 
   const eventKey = 'event:tactical:hsm_verified';
   const alreadyVerified =
@@ -594,8 +650,8 @@ function handleHsmVerify(
     : [...state.learning.appliedStoryLessons, 'lesson_11_hsm_forensics'];
 
   const summaryMsg = alreadyVerified
-    ? '[HSM-VERIFY] PKCS#11 signature & soft-token rotation audit for M_HALE_SEC_01 is already recorded.'
-    : '[HSM-VERIFY COMPLETE] Verified ECDSA-P256 signature belongs to Key ID M_HALE_SEC_01 (Marcus Hale) injected via SoftHSM-Emulator (CKF_HW_SLOT=false, Attestation: MISSING) while splicing e.ward_09 into access_0427.log (Suspicion -5%, Nadia Trust +10%).';
+    ? '[HSM-VERIFY] PKCS#11 signature verification & evidentiary boundary audit for M_HALE_SEC_01 is already recorded.'
+    : '[HSM-VERIFY COMPLETE] Cryptographic fact: ECDSA-P256 signature validates against fixture public key; Fixture metadata: key label M_HALE_SEC_01 (owner metadata: Director Marcus Hale) on SoftHSM-Emulator (CKF_HW_SLOT=false); Hardware attestation: MISSING; Real-world custody: not independently established. Narrative framing hypothesis recorded (Suspicion -5%, Nadia Trust +10%).';
 
   return {
     ...state,

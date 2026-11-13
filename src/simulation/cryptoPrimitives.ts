@@ -377,7 +377,68 @@ function pointMultiply(k: bigint, pt: EcPoint): EcPoint {
   return result;
 }
 
-function parseDerEcdsaSignature(sigHex: string): { r: bigint; s: bigint } | null {
+function parseCanonicalDerPositiveInteger(
+  bytes: Uint8Array,
+  offset: number
+): { value: bigint; nextOffset: number } | null {
+  // Tag must be INTEGER (0x02) and length byte must be present
+  if (offset + 2 > bytes.length || bytes[offset] !== 0x02) {
+    return null;
+  }
+  const len = bytes[offset + 1];
+  // Reject indefinite or long-form length (P-256 scalar DER integer is 1..33 bytes, always < 0x80)
+  if ((len & 0x80) !== 0 || len < 1 || len > 33) {
+    return null;
+  }
+  const valStart = offset + 2;
+  const valEnd = valStart + len;
+  if (valEnd > bytes.length) {
+    return null;
+  }
+
+  const firstByte = bytes[valStart];
+  // Reject negative INTEGER encodings (MSB set without leading 0x00 sign-protection byte)
+  if ((firstByte & 0x80) !== 0) {
+    return null;
+  }
+
+  // If the first byte is 0x00:
+  // - len === 1 means integer value 0 (not a valid positive ECDSA scalar)
+  // - len > 1 is only canonical in DER if the second byte has MSB (0x80) set;
+  //   otherwise the leading 0x00 is redundant and non-canonical.
+  if (firstByte === 0x00) {
+    if (len === 1) {
+      return null;
+    }
+    const secondByte = bytes[valStart + 1];
+    if ((secondByte & 0x80) === 0) {
+      return null;
+    }
+  }
+
+  let hex = '';
+  for (let i = valStart; i < valEnd; i++) {
+    hex += bytes[i].toString(16).padStart(2, '0');
+  }
+  const value = BigInt('0x' + hex);
+  if (value <= 0n) {
+    return null;
+  }
+
+  return { value, nextOffset: valEnd };
+}
+
+/**
+ * Strictly parses a canonical ASN.1 DER ECDSA signature:
+ * - Validates SEQUENCE tag (0x30) and exact short-form sequence length
+ * - Validates r and s INTEGER tags, lengths, and boundaries
+ * - Rejects negative INTEGER encodings and missing sign-protection zero bytes
+ * - Rejects redundant leading zeros
+ * - Rejects any trailing bytes after s
+ */
+export function parseDerEcdsaSignature(
+  sigHex: string
+): { r: bigint; s: bigint } | null {
   const clean = sigHex.trim().toLowerCase().replace(/^0x/, '');
   if (!/^[0-9a-f]+$/.test(clean) || clean.length % 2 !== 0) {
     return null;
@@ -387,33 +448,35 @@ function parseDerEcdsaSignature(sigHex: string): { r: bigint; s: bigint } | null
     bytes[i] = parseInt(clean.slice(i * 2, i * 2 + 2), 16);
   }
 
-  // ASN.1 SEQUENCE (0x30)
+  // ASN.1 SEQUENCE (0x30) with short-form DER length
   if (bytes.length < 8 || bytes[0] !== 0x30) {
     return null;
   }
   const seqLen = bytes[1];
-  if (seqLen + 2 !== bytes.length) {
+  if ((seqLen & 0x80) !== 0 || seqLen < 6 || seqLen + 2 !== bytes.length) {
     return null;
   }
 
-  // First INTEGER: r (0x02)
-  if (bytes[2] !== 0x02) return null;
-  const rLen = bytes[3];
-  if (rLen < 1 || rLen > 33 || 4 + rLen >= bytes.length) return null;
-  const rHex = clean.slice(8, 8 + rLen * 2);
-
-  // Second INTEGER: s (0x02)
-  const sOffset = 4 + rLen;
-  if (bytes[sOffset] !== 0x02) return null;
-  const sLen = bytes[sOffset + 1];
-  if (sLen < 1 || sLen > 33 || sOffset + 2 + sLen !== bytes.length) {
+  // First canonical positive INTEGER: r
+  const rParsed = parseCanonicalDerPositiveInteger(bytes, 2);
+  if (!rParsed) {
     return null;
   }
-  const sHex = clean.slice((sOffset + 2) * 2, (sOffset + 2 + sLen) * 2);
+
+  // Second canonical positive INTEGER: s
+  const sParsed = parseCanonicalDerPositiveInteger(bytes, rParsed.nextOffset);
+  if (!sParsed) {
+    return null;
+  }
+
+  // Reject any trailing bytes after s
+  if (sParsed.nextOffset !== bytes.length) {
+    return null;
+  }
 
   return {
-    r: BigInt('0x' + rHex),
-    s: BigInt('0x' + sHex),
+    r: rParsed.value,
+    s: sParsed.value,
   };
 }
 

@@ -20,6 +20,7 @@ import {
   isGreaseHex,
   Ja4ClientHelloInput,
   Ja4ComputationResult,
+  parseDerEcdsaSignature,
   sha256Hex,
   verifyEcdsaP256Sha256,
 } from './cryptoPrimitives';
@@ -27,6 +28,7 @@ import {
 export {
   computeCanonicalJa4,
   isGreaseHex,
+  parseDerEcdsaSignature,
   sha256Hex,
   verifyEcdsaP256Sha256,
 };
@@ -320,20 +322,42 @@ export function analyzeHsmAndKeyring(
     `  ${hsm.credentialExposureFinding}`,
   ].join('\n');
 
+  const observedFact = signatureMathValid
+    ? `Cryptographic fact: ECDSA-P256 signature is VALID and mathematically validates against fixture public key ${hsm.publicKeyFingerprint}. Fixture metadata: key label is ${hsm.keyIdLabel}, owner metadata says ${hsm.keyOwner}, and slot metadata is ${tokenMetadata}. Hardware attestation: ${hardwareAttestationStatus} (missing).`
+    : `Cryptographic verification FAILED (INVALID): the DER ECDSA-P256 signature does NOT validate against fixture public key ${hsm.publicKeyFingerprint} for the payload referencing ${hsm.plaintextAttributedActor} (fixture metadata key label: ${hsm.keyIdLabel}, slot metadata: ${tokenMetadata}, hardware attestation: ${hardwareAttestationStatus}).`;
+
+  const observedFactZh = signatureMathValid
+    ? `观察事实（密码学事实）：ECDSA-P256 签名数学验算有效（VALID），匹配样本公钥 ${hsm.publicKeyFingerprint}。样本元数据：密钥标签为 ${hsm.keyIdLabel}，持有人元数据标注为 ${hsm.keyOwner}，槽位元数据为 ${tokenMetadata}。硬件防伪证明：${hardwareAttestationStatus}（缺失）。`
+    : `观察事实（验签失败）：ECDSA-P256 签名针对样本公钥 ${hsm.publicKeyFingerprint} 的数学验证失败（INVALID），签名与载荷不匹配（样本元数据标签：${hsm.keyIdLabel}，槽位元数据：${tokenMetadata}，硬件证明：${hardwareAttestationStatus}）。`;
+
+  const technicalInference = signatureMathValid
+    ? `Cryptographic fact: signature validates against the fixture public key (${hsm.publicKeyFingerprint}). Fixture metadata: key label is ${hsm.keyIdLabel}, owner metadata says ${hsm.keyOwner}, and token slot metadata is ${tokenMetadata}. Hardware attestation: missing (${hardwareAttestationStatus}). Real-world custody/ownership: not independently established by cryptographic verification alone.`
+    : `Cryptographic signature verification failed against fixture public key (${hsm.publicKeyFingerprint}). Because mathematical verification failed, the artifact cannot be treated as a verified signature and no cryptographic non-repudiation or key-holder attribution can be inferred.`;
+
+  const technicalInferenceZh = signatureMathValid
+    ? `技术推论：密码学事实仅证明该签名在数学上匹配样本公钥（${hsm.publicKeyFingerprint}）；样本元数据标注密钥标签为 ${hsm.keyIdLabel}、持有人元数据为 ${hsm.keyOwner}、槽位为 ${tokenMetadata}；物理硬件防伪证明缺失（${hardwareAttestationStatus}）；现实物理世界中的密钥实际持有人与保管链不能仅凭数学验签独立证实。`
+    : `技术推论：针对样本公钥（${hsm.publicKeyFingerprint}）的密码学签名验算未通过。由于数学验证失败，不能将该记录视为有效签名，亦不能得出任何密码学抗抵赖或密钥归因结论。`;
+
+  const narrativeHypothesis = signatureMathValid
+    ? `Fictional narrative hypothesis: Eli’s revoked account ${hsm.plaintextAttributedActor} was spliced into the plaintext log while an ephemeral SoftHSM slot loaded with the private key matching ${hsm.keyIdLabel} (attributed in Vespera directory metadata to ${hsm.keyOwner}) signed the Project LANTERN purge.`
+    : `Verification failed: the signature or payload was tampered with or corrupted, so the framing hypothesis regarding ${hsm.plaintextAttributedActor} and ${hsm.keyIdLabel} remains unverified.`;
+
+  const narrativeHypothesisZh = signatureMathValid
+    ? `叙事假设：有人在明文日志中嫁接栽赃已注销账号 ${hsm.plaintextAttributedActor}，同时在临时软令牌槽位中加载对应 ${hsm.keyIdLabel}（企业目录元数据登记为 ${hsm.keyOwner}）的私钥签署了“灯塔计划”清洗指令。`
+    : `叙事假设（未证实）：由于数字签名数学验算失败，载荷或签名已遭篡改或损坏，关于 ${hsm.plaintextAttributedActor} 与 ${hsm.keyIdLabel} 的栽赃假设尚未得到密码学证实。`;
+
   const report: ForensicFindingReport = {
     findingId: 'FND-11-PKCS11-SIG',
     sourceArtifact: 'access_0427.log & kern_keyring.log',
-    observedFact: `Log purge #9904 and the reactivation of ${hsm.plaintextAttributedActor} carry an ECDSA-P256 signature (${signatureMathValid ? 'VALID' : 'INVALID'}) verified against public key ${hsm.publicKeyFingerprint} (Key ID: ${hsm.keyIdLabel}), generated on ${tokenMetadata} with ${hardwareAttestationStatus}.`,
-    observedFactZh: `观察事实：#9904 日志清洗与 ${hsm.plaintextAttributedActor} 重激活记录带有 ECDSA-P256 数字签名（验签结果：${signatureMathValid ? '有效' : '无效'}），对应公钥 ${hsm.publicKeyFingerprint}（密钥标识 ${hsm.keyIdLabel}），生成于软令牌 ${tokenMetadata} 且硬件证明状态为 ${hardwareAttestationStatus}。`,
-    technicalInference:
-      'Separating (1) mathematical signature validity, (2) Key ID (M_HALE_SEC_01), (3) soft-token slot metadata (CKF_HW_SLOT=false), and (4) missing hardware attestation confirms that the private key registered to Marcus Hale signed the batch via an un-attested software emulator while splicing e.ward_09 into the plaintext log.',
-    technicalInferenceZh:
-      '技术推论：严格区分 (1) 签名数学有效性、(2) 密钥 ID (M_HALE_SEC_01)、(3) 软令牌元数据 (CKF_HW_SLOT=false) 与 (4) 缺失的物理硬件证明后，证实有人使用归属 Marcus Hale 公钥的私钥通过软模拟器签署指令，同时在明文日志中嫁接栽赃 e.ward_09。',
-    narrativeHypothesis:
-      'Eli’s revoked account e.ward_09 was framed using Marcus Hale’s executive signing key mounted in an ephemeral SoftHSM slot to cover up the Project LANTERN purge.',
-    narrativeHypothesisZh:
-      '叙事假设：有人将归属安全总监 Marcus Hale 的签名私钥挂载至临时软令牌槽位，伪造了 e.ward_09 的清洗授权。',
-    confidence: 'HIGH (Deterministic Match)',
+    observedFact,
+    observedFactZh,
+    technicalInference,
+    technicalInferenceZh,
+    narrativeHypothesis,
+    narrativeHypothesisZh,
+    confidence: signatureMathValid
+      ? 'HIGH (Deterministic Match)'
+      : 'MEDIUM (Corroborated Indicator)',
     relatedStoryEvent: 'Exoneration Proof for e.ward_09 Account Reuse',
     verificationStatus: signatureMathValid
       ? 'VERIFIED'

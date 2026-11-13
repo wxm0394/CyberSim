@@ -26,14 +26,14 @@ export const HSM_FORENSICS_LESSON: LearningLesson = {
         '真正的硬件安全模块（HSM）在防篡改安全芯片内部生成并保存私钥，其 PKCS#11 槽位标记 `CKF_HW_SLOT=true`，并附带硬件防伪证明（Hardware Attestation）。而软件 PKCS#11 模拟器（Soft-Token）虽然同样能计算出在数学上通过公钥验签的 ECDSA-P256 签名，但其槽位遥测会暴露 `CKF_HW_SLOT=false` 且缺乏硬件出厂证明。',
       keyTerms: ['PKCS#11 Slot & Token', 'CKF_HW_SLOT', 'ECDSA-P256 Mathematical Validity', 'Hardware Attestation Certificate'],
       practicalRule:
-        'A mathematically valid ECDSA signature only proves possession of the private key bytes—you must verify Key ID (`M_HALE_SEC_01`) and PKCS#11 hardware attestation to know who and what device signed it.',
+        'A mathematically valid ECDSA signature proves that the signature matches the supplied public key—it does not independently establish real-world physical custody. Separate (1) cryptographic signature validity, (2) fixture key/owner metadata (`M_HALE_SEC_01`), (3) soft-token slot metadata (`CKF_HW_SLOT=false`), and (4) missing hardware attestation.',
       practicalRuleZh:
-        'ECDSA 签名在数学上验签通过，仅证明签名者持有对应私钥数据；必须同时核查密钥标识（Key ID）与 PKCS#11 硬件证明，才能判定真实的签名主体与设备类型。',
+        'ECDSA 签名在数学上验签通过仅证明签名与所提供的公钥匹配，不能独立证实物理世界中的实际保管人。取证时必须严格区分：(1) 密码学签名有效性、(2) 样本密钥标签与登记元数据（`M_HALE_SEC_01`）、(3) 软令牌元数据（`CKF_HW_SLOT=false`）与 (4) 缺失的物理硬件证明。',
       diagramLines: [
-        '1. Signature Math       : VALID (ECDSA-P256 verifies against public key 04:a9:7c...)',
-        '2. Key Identifier       : M_HALE_SEC_01 (Director Marcus Hale — NOT Eli Ward)',
+        '1. Cryptographic Fact   : VALID (Signature validates against fixture PubKey SHA256:11:FA:C3:75...)',
+        '2. Fixture Metadata     : Key label M_HALE_SEC_01 (Owner metadata: Director Marcus Hale)',
         '3. Token Metadata       : SoftHSM-Emulator v2.6 (CKF_HW_SLOT=false)',
-        '4. Hardware Attestation : MISSING (Forged via off-hours soft-token injection)',
+        '4. Hardware Attestation : MISSING (Real-world physical custody not independently established)',
       ],
     },
     {
@@ -41,16 +41,16 @@ export const HSM_FORENSICS_LESSON: LearningLesson = {
       title: 'Credential Exposure & Anomalous Key Rotation Timelines',
       titleZh: '密钥暴露扫描与异常轮换时间线取证',
       summary:
-        'Correlating `kern_keyring.log` with `access_0427.log` shows that `M_HALE_SEC_01` was exported into an ephemeral software slot at `02:13:58 UTC`, used 13 seconds later to sign the `02:14:11 UTC` batch while splicing `e.ward_09` into the plaintext header, and revoked at `02:15:04 UTC`.',
+        'Correlating `kern_keyring.log` with `access_0427.log` shows that the key labeled `M_HALE_SEC_01` was exported into an ephemeral software slot at `02:13:58 UTC`, used 13 seconds later to sign the `02:14:11 UTC` batch while splicing `e.ward_09` into the plaintext header, and revoked at `02:15:04 UTC`.',
       summaryZh:
-        '将 `kern_keyring.log` 与 `access_0427.log` 交叉比对可以发现：密钥 `M_HALE_SEC_01` 在 `02:13:58 UTC` 被挂载至临时软令牌槽位，13 秒后（`02:14:11 UTC`）即被用于签署伪造有 `e.ward_09` 明文头的批处理指令，随后在 `02:15:04 UTC` 被紧急卸载。',
-      keyTerms: ['Key Rotation Timeline', 'Plaintext Actor Splice', 'Ephemeral Soft-Token Slot', 'Non-Repudiation Forensics'],
+        '将 `kern_keyring.log` 与 `access_0427.log` 交叉比对可以发现：标记为 `M_HALE_SEC_01` 的密钥在 `02:13:58 UTC` 被挂载至临时软令牌槽位，13 秒后（`02:14:11 UTC`）即被用于签署伪造有 `e.ward_09` 明文头的批处理指令，随后在 `02:15:04 UTC` 被紧急卸载。',
+      keyTerms: ['Key Rotation Timeline', 'Plaintext Actor Splice', 'Ephemeral Soft-Token Slot', 'Evidentiary Attribution Boundary'],
       practicalRule:
-        'Always compare the plaintext actor field in an audit log against the cryptographic signer Key ID and keyring rotation timestamps.',
+        'Compare the plaintext actor field in an audit log against the public-key verification result, key metadata label, and keyring rotation timestamps while distinguishing cryptographic facts from narrative custody hypotheses.',
       practicalRuleZh:
-        '审计关键操作日志时，务必将明文记录的操作员工号与底层密码学签名块的 Key ID 及密钥挂载时间线进行交叉核对。',
+        '审计关键操作日志时，应将明文操作员工号与公钥验签结果、密钥元数据标签及密钥挂载时间线交叉比对，并将密码学事实与叙事归属假设严格区分。',
       diagramLines: [
-        '02:13:58 UTC : Soft-token slot 0x02 mounts key M_HALE_SEC_01 (CKF_HW_SLOT=false)',
+        '02:13:58 UTC : Soft-token slot 0x02 mounts key labeled M_HALE_SEC_01 (CKF_HW_SLOT=false)',
         '02:14:11 UTC : Signs batch_0427 with plaintext header "ACTOR=e.ward_09"',
         '02:15:04 UTC : Ephemeral soft-token destroyed to hide tracks',
       ],
@@ -62,9 +62,9 @@ export const HSM_FORENSICS_LESSON: LearningLesson = {
     title: 'PKCS#11 Signature Verification & Key Rotation Forensics Lab',
     titleZh: 'PKCS#11 签名验证、密钥标识与软令牌轮换取证实验',
     objective:
-      'Inspect the PKCS#11 signature block on `access_0427.log` and correlate `kern_keyring.log` to distinguish mathematical signature validity, Key ID `M_HALE_SEC_01`, soft-token emulation metadata, and missing hardware attestation.',
+      'Inspect the PKCS#11 signature block on `access_0427.log` and correlate `kern_keyring.log` to distinguish cryptographic signature validity, fixture key metadata (`M_HALE_SEC_01`), soft-token emulation metadata, missing hardware attestation, and narrative custody hypotheses.',
     objectiveZh:
-      '核查 `access_0427.log` 的 PKCS#11 签名块并关联 `kern_keyring.log`，严谨区分数学签名有效性、密钥标识 `M_HALE_SEC_01`、软令牌元数据与缺失的硬件证明。',
+      '核查 `access_0427.log` 的 PKCS#11 签名块并关联 `kern_keyring.log`，严谨区分密码学签名有效性、样本密钥元数据（`M_HALE_SEC_01`）、软令牌元数据、缺失的硬件证明与叙事归因假设。',
     environmentBanner: 'GREYOS SANDBOX // PKCS#11 HSM & KEYRING FORENSIC VERIFIER // PASSIVE AUDIT',
     initialSymptom:
       '`access_0427.log` lists `ACTOR=e.ward_09` in plaintext at `02:14:11 UTC`, but its detached PKCS#11 signature block references slot `0x02` (`M_HALE_SEC_01`).',
@@ -96,21 +96,21 @@ export const HSM_FORENSICS_LESSON: LearningLesson = {
         commandPreview: 'hsm-verify --inspect-slot 0x02 --artifact access_0427.log',
         targetNode: 'PKCS#11 Slot 0x02 (access_0427.log.sig)',
         telemetryOutput: [
-          '[1. CRYPTO SIGNATURE MATH] ECDSA-P256 Signature VALID (Matches PubKey 04:a9:7c:81:2e:f0:44:19:bb:02)',
-          '[2. SIGNING KEY ID       ] CKA_LABEL = "M_HALE_SEC_01" (Custodian: Director Marcus Hale)',
-          '[3. TOKEN METADATA       ] Model = "SoftHSM-Emulator v2.6" | CKF_HW_SLOT = false',
-          '[4. HARDWARE ATTESTATION ] FAILED / MISSING (No physical FIPS 140-3 YubiHSM attestation chain)',
+          '[1. CRYPTOGRAPHIC FACT  ] ECDSA-P256 Signature VALID (Validates against fixture PubKey SHA256:11:FA:C3:75...)',
+          '[2. FIXTURE METADATA    ] CKA_LABEL = "M_HALE_SEC_01" (Owner metadata: Director Marcus Hale)',
+          '[3. TOKEN METADATA      ] Model = "SoftHSM-Emulator v2.6" | CKF_HW_SLOT = false',
+          '[4. HARDWARE ATTESTATION] MISSING_HARDWARE_ATTESTATION (Real-world custody not independently established)',
         ].join('\n'),
         telemetryOutputZh: [
-          '【1. 密码学签名数学验算】ECDSA-P256 签名在数学上有效（匹配公钥 04:a9:7c:81:2e:f0:44:19:bb:02）',
-          '【2. 签名密钥标识 (ID) 】CKA_LABEL = "M_HALE_SEC_01"（密钥持有人：安全总监 Marcus Hale）',
-          '【3. 令牌槽位元数据    】设备型号 = "SoftHSM-Emulator v2.6" | 硬件标志 CKF_HW_SLOT = false',
-          '【4. 物理硬件防伪证明  】缺失（无物理 YubiHSM 硬件芯片签名链，实为软件模拟器注入）',
+          '【1. 密码学事实          】ECDSA-P256 签名数学验证通过（匹配样本公钥 SHA256:11:FA:C3:75...）',
+          '【2. 样本元数据          】CKA_LABEL = "M_HALE_SEC_01"（持有人元数据标注：安全总监 Marcus Hale）',
+          '【3. 令牌槽位元数据      】设备型号 = "SoftHSM-Emulator v2.6" | 硬件标志 CKF_HW_SLOT = false',
+          '【4. 物理硬件防伪证明    】MISSING_HARDWARE_ATTESTATION（缺失，物理世界实际保管人不能仅凭数学验签独立证实）',
         ].join('\n'),
         revealsClue:
-          'Separated all four forensic dimensions: the ECDSA math is valid for `M_HALE_SEC_01`, proving Marcus Hale’s key signed the batch via a software PKCS#11 emulator (`CKF_HW_SLOT=false`) while forging `e.ward_09` in the plaintext log.',
+          'Separated cryptographic fact from metadata and narrative hypothesis: the signature validates against the fixture public key (`SHA256:11:FA:C3:75...`), while fixture metadata labels the key `M_HALE_SEC_01` (owner metadata: Marcus Hale) on `SoftHSM-Emulator` (`CKF_HW_SLOT=false`) with missing hardware attestation.',
         revealsClueZh:
-          '完整厘清四层取证事实：签名在数学上对 `M_HALE_SEC_01` 有效，证实有人使用 Marcus Hale 的私钥通过软令牌模拟器 (`CKF_HW_SLOT=false`) 签署了指令，同时在明文日志中栽赃 `e.ward_09`。',
+          '厘清密码学事实与元数据及叙事假设的边界：签名在数学上匹配样本公钥（`SHA256:11:FA:C3:75...`），样本元数据标注密钥为 `M_HALE_SEC_01`（持有人元数据：Marcus Hale）且运行于软令牌（`CKF_HW_SLOT=false`）、缺失硬件防伪证明。',
         isCriticalClue: true,
       },
       {

@@ -1,11 +1,24 @@
-import { DeadAirState, SceneId } from '../game/types';
+import {
+  DeadAirState,
+  HostPrivilegeLevel,
+  SceneId,
+  TerminalOutputLine,
+  VirtualFileEntry,
+} from '../game/types';
 import {
   CURRENT_SAVE_VERSION,
   createInitialDeadAirState,
 } from '../data/storyData';
 import { migrateLearningState } from '../learning/learningProgress';
+import {
+  KnowledgeCategoryId,
+  SourceTrackFilter,
+  UnlockedCapabilityId,
+} from '../learning/lessonTypes';
 
 export const STORAGE_KEY_V3 = 'dead_air_save_v3';
+export const CORRUPTED_STORAGE_KEY_V3_BACKUP =
+  'dead_air_save_v3_corrupted_backup';
 export const LEGACY_STORAGE_KEY_V2 = 'dead_air_save_v2';
 export const LEGACY_STORAGE_KEY_V1 = 'dead_air_save_v1';
 
@@ -15,6 +28,318 @@ const VALID_SCENES: SceneId[] = [
   'LAUNDROMAT',
   'APARTMENT_RETURN',
 ];
+
+const VALID_PRIVILEGES: HostPrivilegeLevel[] = [
+  'LOCKED',
+  'GUEST',
+  'USER',
+  'OPERATOR',
+  'ADMIN',
+  'ROOT',
+];
+
+const VALID_TERMINAL_TONES: TerminalOutputLine['tone'][] = [
+  'command',
+  'output',
+  'highlight',
+  'error',
+  'system',
+];
+
+const VALID_SOURCE_TRACKS: SourceTrackFilter[] = [
+  'all',
+  'network_internet',
+  'tactical_security',
+];
+
+const VALID_CATEGORIES: (KnowledgeCategoryId | 'all')[] = [
+  'all',
+  'networking',
+  'identity_trust',
+  'routing_tunnels',
+  'distributed_web',
+  'investigation',
+  'privacy_opsec',
+  'host_forensics',
+  'network_attribution',
+  'counter_deception',
+  'crypto_forensics',
+  'container_appsec',
+];
+
+const VALID_CAPABILITIES: UnlockedCapabilityId[] = [
+  'packet_inspector',
+  'resolver_inspector',
+  'certificate_analyzer',
+  'proxy_route_editor',
+  'tunnel_monitor',
+  'topology_mapper',
+  'archive_verifier',
+  'archive_search',
+  'persistence_auditor',
+  'tls_fingerprint_inspector',
+  'canary_inspector',
+  'hsm_verifier',
+  'binary_container_analyzer',
+];
+
+function isPlainObject(val: unknown): val is Record<string, unknown> {
+  return Boolean(val) && typeof val === 'object' && !Array.isArray(val);
+}
+
+function isNonEmptyString(val: unknown): val is string {
+  return typeof val === 'string' && val.trim().length > 0;
+}
+
+function isValidEvidenceEntry(entry: unknown, strictV3 = false): boolean {
+  if (!isPlainObject(entry)) return false;
+  if (!isNonEmptyString(entry.id)) return false;
+  if (typeof entry.discovered !== 'boolean') return false;
+  if (entry.correlated === undefined) {
+    if (strictV3) return false;
+  } else if (typeof entry.correlated !== 'boolean') {
+    return false;
+  }
+  if (strictV3) {
+    if (
+      !isNonEmptyString(entry.title) ||
+      typeof entry.chronologicalOrder !== 'number' ||
+      !Number.isFinite(entry.chronologicalOrder) ||
+      !isNonEmptyString(entry.source)
+    ) {
+      return false;
+    }
+  }
+  return true;
+}
+
+function isValidFileEntry(
+  entry: unknown,
+  strictV3 = false
+): entry is VirtualFileEntry {
+  if (!isPlainObject(entry)) return false;
+  if (!isNonEmptyString(entry.path) || !entry.path.trim().startsWith('/')) {
+    return false;
+  }
+  if (typeof entry.unlocked !== 'boolean') return false;
+  if (strictV3) {
+    if (
+      !isNonEmptyString(entry.name) ||
+      !isNonEmptyString(entry.parentDir) ||
+      !entry.parentDir.trim().startsWith('/') ||
+      typeof entry.content !== 'string'
+    ) {
+      return false;
+    }
+  } else {
+    if (entry.name !== undefined && !isNonEmptyString(entry.name)) return false;
+    if (
+      entry.parentDir !== undefined &&
+      (!isNonEmptyString(entry.parentDir) ||
+        !entry.parentDir.trim().startsWith('/'))
+    ) {
+      return false;
+    }
+    if (entry.content !== undefined && typeof entry.content !== 'string') {
+      return false;
+    }
+  }
+  return true;
+}
+
+function isValidCharacterEntry(entry: unknown, strictV3 = false): boolean {
+  if (!isPlainObject(entry)) return false;
+  if (!isNonEmptyString(entry.id)) return false;
+  if (typeof entry.trust !== 'number' || !Number.isFinite(entry.trust)) {
+    return false;
+  }
+  if (!isNonEmptyString(entry.currentNodeId)) return false;
+  if (strictV3) {
+    if (
+      !isNonEmptyString(entry.name) ||
+      !Array.isArray(entry.nodes) ||
+      entry.nodes.length === 0
+    ) {
+      return false;
+    }
+  }
+  return true;
+}
+
+function isValidInventoryEntry(entry: unknown, strictV3 = false): boolean {
+  if (!isPlainObject(entry)) return false;
+  if (!isNonEmptyString(entry.id)) return false;
+  if (typeof entry.acquired !== 'boolean') return false;
+  if (strictV3 && !isNonEmptyString(entry.name)) return false;
+  return true;
+}
+
+function isValidNetworkHostEntry(entry: unknown, strictV3 = false): boolean {
+  if (!isPlainObject(entry)) return false;
+  if (!isNonEmptyString(entry.ip)) return false;
+  if (
+    typeof entry.discovered !== 'boolean' ||
+    typeof entry.scanned !== 'boolean' ||
+    typeof entry.privilege !== 'string' ||
+    !VALID_PRIVILEGES.includes(entry.privilege as HostPrivilegeLevel) ||
+    typeof entry.compromised !== 'boolean' ||
+    typeof entry.actionCompleted !== 'boolean'
+  ) {
+    return false;
+  }
+  if (strictV3) {
+    if (!isNonEmptyString(entry.hostname) || !Array.isArray(entry.services)) {
+      return false;
+    }
+  }
+  return true;
+}
+
+function isValidCompletedEvents(arr: unknown): boolean {
+  return Array.isArray(arr) && arr.every((ev) => isNonEmptyString(ev));
+}
+
+function isValidInspectedFiles(arr: unknown): boolean {
+  return (
+    Array.isArray(arr) &&
+    arr.every((fp) => isNonEmptyString(fp) && fp.trim().startsWith('/'))
+  );
+}
+
+function isValidTerminalHistoryEntry(entry: unknown): boolean {
+  if (!isPlainObject(entry)) return false;
+  return (
+    isNonEmptyString(entry.id) &&
+    typeof entry.text === 'string' &&
+    typeof entry.tone === 'string' &&
+    VALID_TERMINAL_TONES.includes(entry.tone as TerminalOutputLine['tone'])
+  );
+}
+
+function isValidHotspotEntry(entry: unknown, strictV3 = false): boolean {
+  if (!isPlainObject(entry)) return false;
+  if (!isNonEmptyString(entry.id) || typeof entry.inspected !== 'boolean') {
+    return false;
+  }
+  if (strictV3) {
+    if (
+      !isNonEmptyString(entry.label) ||
+      typeof entry.x !== 'number' ||
+      !Number.isFinite(entry.x) ||
+      typeof entry.y !== 'number' ||
+      !Number.isFinite(entry.y)
+    ) {
+      return false;
+    }
+  }
+  return true;
+}
+
+function isValidHotspotsMap(hotspots: unknown, strictV3 = false): boolean {
+  if (!isPlainObject(hotspots)) return false;
+  if (strictV3) {
+    for (const sceneId of VALID_SCENES) {
+      const list = hotspots[sceneId];
+      if (
+        !Array.isArray(list) ||
+        list.length === 0 ||
+        !list.every((h) => isValidHotspotEntry(h, true))
+      ) {
+        return false;
+      }
+    }
+    return true;
+  }
+
+  for (const [sceneKey, list] of Object.entries(hotspots)) {
+    if (
+      !VALID_SCENES.includes(sceneKey as SceneId) ||
+      !Array.isArray(list) ||
+      !list.every((h) => isValidHotspotEntry(h, false))
+    ) {
+      return false;
+    }
+  }
+  return true;
+}
+
+function isValidLearningObject(learning: unknown, strictV3 = false): boolean {
+  if (!isPlainObject(learning)) return false;
+
+  const checkStringArray = (val: unknown, required: boolean): boolean => {
+    if (val === undefined) return !required;
+    return Array.isArray(val) && val.every((item) => isNonEmptyString(item));
+  };
+
+  if (
+    !checkStringArray(learning.completedLessonIds, strictV3) ||
+    !checkStringArray(learning.unlockedTools, strictV3) ||
+    !checkStringArray(learning.masteredConcepts, strictV3) ||
+    !checkStringArray(learning.appliedStoryLessons, strictV3) ||
+    !checkStringArray(learning.bruteForceStoryLessons, strictV3)
+  ) {
+    return false;
+  }
+
+  if (learning.unlockedCapabilities === undefined) {
+    if (strictV3) return false;
+  } else if (
+    !Array.isArray(learning.unlockedCapabilities) ||
+    !learning.unlockedCapabilities.every(
+      (cap) =>
+        typeof cap === 'string' &&
+        VALID_CAPABILITIES.includes(cap as UnlockedCapabilityId)
+    )
+  ) {
+    return false;
+  }
+
+  if (learning.executedDiagnosticsByLesson === undefined) {
+    if (strictV3) return false;
+  } else if (
+    !isPlainObject(learning.executedDiagnosticsByLesson) ||
+    !Object.entries(learning.executedDiagnosticsByLesson).every(
+      ([k, v]) =>
+        isNonEmptyString(k) &&
+        Array.isArray(v) &&
+        v.every((d) => isNonEmptyString(d))
+    )
+  ) {
+    return false;
+  }
+
+  if (learning.labResolutionByLesson === undefined) {
+    if (strictV3) return false;
+  } else if (
+    !isPlainObject(learning.labResolutionByLesson) ||
+    !Object.entries(learning.labResolutionByLesson).every(
+      ([k, v]) =>
+        isNonEmptyString(k) && (v === 'analytical' || v === 'brute_force')
+    )
+  ) {
+    return false;
+  }
+
+  if (strictV3) {
+    if (
+      typeof learning.activeSourceTrack !== 'string' ||
+      !VALID_SOURCE_TRACKS.includes(
+        learning.activeSourceTrack as SourceTrackFilter
+      ) ||
+      typeof learning.activeCategoryFilter !== 'string' ||
+      !VALID_CATEGORIES.includes(
+        learning.activeCategoryFilter as KnowledgeCategoryId | 'all'
+      ) ||
+      !isNonEmptyString(learning.selectedLessonId) ||
+      (learning.activeLabLessonId !== null &&
+        !isNonEmptyString(learning.activeLabLessonId))
+    ) {
+      return false;
+    }
+  }
+
+  return true;
+}
 
 export type ValidLegacySaveCandidate = Partial<DeadAirState> & {
   flags: Partial<DeadAirState['flags']>;
@@ -26,24 +351,28 @@ export type ValidLegacySaveCandidate = Partial<DeadAirState> & {
 export function isValidLegacySaveShape(
   raw: unknown
 ): raw is ValidLegacySaveCandidate {
-  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) {
+  if (!isPlainObject(raw)) {
     return false;
   }
   const c = raw as Partial<DeadAirState>;
   if (
-    !c.flags ||
-    typeof c.flags !== 'object' ||
-    Array.isArray(c.flags) ||
+    !isPlainObject(c.flags) ||
     typeof c.flags.trust_nadia !== 'number' ||
+    !Number.isFinite(c.flags.trust_nadia) ||
     typeof c.flags.corporate_suspicion !== 'number' ||
-    typeof c.flags.player_exposure !== 'number'
+    !Number.isFinite(c.flags.corporate_suspicion) ||
+    typeof c.flags.player_exposure !== 'number' ||
+    !Number.isFinite(c.flags.player_exposure)
   ) {
     return false;
   }
   if (
     !Array.isArray(c.evidence) ||
+    !c.evidence.every((e) => isValidEvidenceEntry(e, false)) ||
     !Array.isArray(c.files) ||
-    !Array.isArray(c.characters)
+    !c.files.every((f) => isValidFileEntry(f, false)) ||
+    !Array.isArray(c.characters) ||
+    !c.characters.every((ch) => isValidCharacterEntry(ch, false))
   ) {
     return false;
   }
@@ -51,6 +380,45 @@ export function isValidLegacySaveShape(
     typeof c.currentScene !== 'string' ||
     !VALID_SCENES.includes(c.currentScene as SceneId)
   ) {
+    return false;
+  }
+  if (
+    c.inventory !== undefined &&
+    (!Array.isArray(c.inventory) ||
+      !c.inventory.every((i) => isValidInventoryEntry(i, false)))
+  ) {
+    return false;
+  }
+  if (
+    c.networkHosts !== undefined &&
+    (!Array.isArray(c.networkHosts) ||
+      !c.networkHosts.every((h) => isValidNetworkHostEntry(h, false)))
+  ) {
+    return false;
+  }
+  if (
+    c.completedEvents !== undefined &&
+    !isValidCompletedEvents(c.completedEvents)
+  ) {
+    return false;
+  }
+  if (
+    c.inspectedFiles !== undefined &&
+    !isValidInspectedFiles(c.inspectedFiles)
+  ) {
+    return false;
+  }
+  if (
+    c.terminalHistory !== undefined &&
+    (!Array.isArray(c.terminalHistory) ||
+      !c.terminalHistory.every(isValidTerminalHistoryEntry))
+  ) {
+    return false;
+  }
+  if (c.hotspots !== undefined && !isValidHotspotsMap(c.hotspots, false)) {
+    return false;
+  }
+  if (c.learning !== undefined && !isValidLearningObject(c.learning, false)) {
     return false;
   }
   return true;
@@ -66,33 +434,36 @@ export function isValidV3SaveShape(raw: unknown): raw is DeadAirState {
   }
   if (
     !Array.isArray(c.unlockedScenes) ||
+    c.unlockedScenes.length === 0 ||
+    !c.unlockedScenes.every((s) => VALID_SCENES.includes(s as SceneId)) ||
+    !Array.isArray(c.evidence) ||
+    c.evidence.length === 0 ||
+    !c.evidence.every((e) => isValidEvidenceEntry(e, true)) ||
+    !Array.isArray(c.files) ||
+    c.files.length === 0 ||
+    !c.files.every((f) => isValidFileEntry(f, true)) ||
+    !Array.isArray(c.characters) ||
+    c.characters.length === 0 ||
+    !c.characters.every((ch) => isValidCharacterEntry(ch, true)) ||
     !Array.isArray(c.inventory) ||
+    c.inventory.length === 0 ||
+    !c.inventory.every((i) => isValidInventoryEntry(i, true)) ||
     !Array.isArray(c.networkHosts) ||
-    !Array.isArray(c.completedEvents) ||
-    !Array.isArray(c.inspectedFiles) ||
+    c.networkHosts.length === 0 ||
+    !c.networkHosts.every((h) => isValidNetworkHostEntry(h, true)) ||
+    !isValidCompletedEvents(c.completedEvents) ||
+    !isValidInspectedFiles(c.inspectedFiles) ||
     !Array.isArray(c.terminalHistory) ||
-    typeof c.currentDir !== 'string' ||
-    !c.currentDir.trim()
+    !c.terminalHistory.every(isValidTerminalHistoryEntry) ||
+    !isNonEmptyString(c.currentDir) ||
+    !c.currentDir.trim().startsWith('/')
   ) {
     return false;
   }
-  if (
-    !c.hotspots ||
-    typeof c.hotspots !== 'object' ||
-    !Array.isArray(c.hotspots.APARTMENT_NIGHT) ||
-    !Array.isArray(c.hotspots.STREET_NIGHT) ||
-    !Array.isArray(c.hotspots.LAUNDROMAT) ||
-    !Array.isArray(c.hotspots.APARTMENT_RETURN)
-  ) {
+  if (!isValidHotspotsMap(c.hotspots, true)) {
     return false;
   }
-  if (
-    !c.learning ||
-    typeof c.learning !== 'object' ||
-    !Array.isArray(c.learning.completedLessonIds) ||
-    !Array.isArray(c.learning.unlockedCapabilities) ||
-    !Array.isArray(c.learning.unlockedTools)
-  ) {
+  if (!isValidLearningObject(c.learning, true)) {
     return false;
   }
   const f = c.flags!;
@@ -156,7 +527,7 @@ export function migrateDeadAirSave(
   }
 
   const completedEvents = Array.isArray(candidate.completedEvents)
-    ? Array.from(new Set(candidate.completedEvents))
+    ? Array.from(new Set(candidate.completedEvents.filter(isNonEmptyString)))
     : [];
   if (
     firstChoiceLocked &&
@@ -166,7 +537,13 @@ export function migrateDeadAirSave(
   }
 
   const inspectedFiles = Array.isArray(candidate.inspectedFiles)
-    ? Array.from(new Set(candidate.inspectedFiles))
+    ? Array.from(
+        new Set(
+          candidate.inspectedFiles.filter(
+            (fp) => isNonEmptyString(fp) && fp.trim().startsWith('/')
+          )
+        )
+      )
     : [];
 
   // Merge inventory acquired state
@@ -201,8 +578,7 @@ export function migrateDeadAirSave(
   if (Array.isArray(candidate.files)) {
     for (const extraFile of candidate.files) {
       if (
-        extraFile &&
-        typeof extraFile.path === 'string' &&
+        isValidFileEntry(extraFile, true) &&
         !migratedFiles.some((f) => f.path === extraFile.path)
       ) {
         migratedFiles.push({ ...extraFile });
@@ -292,13 +668,15 @@ export function migrateDeadAirSave(
   const cameraScrubbed = Boolean(candidate.flags.camera_scrubbed);
 
   const migratedCurrentDir =
-    typeof candidate.currentDir === 'string' && candidate.currentDir.trim()
+    typeof candidate.currentDir === 'string' &&
+    candidate.currentDir.trim().startsWith('/')
       ? candidate.currentDir
       : base.currentDir;
 
   const migratedTerminalHistory =
     Array.isArray(candidate.terminalHistory) &&
-    candidate.terminalHistory.length > 0
+    candidate.terminalHistory.length > 0 &&
+    candidate.terminalHistory.every(isValidTerminalHistoryEntry)
       ? candidate.terminalHistory.map((line) => ({ ...line }))
       : base.terminalHistory;
 
@@ -390,18 +768,39 @@ export function loadDeadAirState(): DeadAirState {
   const params = new URLSearchParams(window.location.search);
   const autostart = params.get('autostart') === '1';
 
-  // 1. Try V3 primary storage key (requires full valid V3 shape)
+  let malformedRawV3: string | null = null;
+
+  // 1. Try V3 primary storage key (requires full valid V3 shape including element-level validation)
   try {
     const rawV3 = window.localStorage.getItem(STORAGE_KEY_V3);
-    if (rawV3) {
+    if (rawV3 !== null) {
       const parsedV3 = JSON.parse(rawV3);
       if (isValidV3SaveShape(parsedV3)) {
         return migrateDeadAirSave(parsedV3, autostart);
       }
+      malformedRawV3 = rawV3;
     }
   } catch {
-    // Corrupted or incomplete V3 JSON: preserve it and fall through to V2/V1
+    // Corrupted V3 JSON: record raw string and fall through to V2/V1
+    try {
+      malformedRawV3 = window.localStorage.getItem(STORAGE_KEY_V3);
+    } catch {
+      malformedRawV3 = null;
+    }
   }
+
+  const preserveMalformedV3BeforeOverwrite = () => {
+    if (malformedRawV3 !== null) {
+      try {
+        window.localStorage.setItem(
+          CORRUPTED_STORAGE_KEY_V3_BACKUP,
+          malformedRawV3
+        );
+      } catch {
+        // Ignore storage quota errors
+      }
+    }
+  };
 
   // 2. Try V2 legacy storage key -> migrate to V3 and write V3 only after successful migration
   try {
@@ -411,6 +810,7 @@ export function loadDeadAirState(): DeadAirState {
       if (isValidLegacySaveShape(parsedV2)) {
         const migrated = migrateDeadAirSave(parsedV2, autostart);
         if (isValidV3SaveShape(migrated)) {
+          preserveMalformedV3BeforeOverwrite();
           saveDeadAirState(migrated);
           return migrated;
         }
@@ -428,6 +828,7 @@ export function loadDeadAirState(): DeadAirState {
       if (isValidLegacySaveShape(parsedV1)) {
         const migrated = migrateDeadAirSave(parsedV1, autostart);
         if (isValidV3SaveShape(migrated)) {
+          preserveMalformedV3BeforeOverwrite();
           saveDeadAirState(migrated);
           return migrated;
         }
@@ -457,6 +858,7 @@ export function clearDeadAirSave(): DeadAirState {
   if (typeof window !== 'undefined') {
     try {
       window.localStorage.removeItem(STORAGE_KEY_V3);
+      window.localStorage.removeItem(CORRUPTED_STORAGE_KEY_V3_BACKUP);
       window.localStorage.removeItem(LEGACY_STORAGE_KEY_V2);
       window.localStorage.removeItem(LEGACY_STORAGE_KEY_V1);
     } catch {

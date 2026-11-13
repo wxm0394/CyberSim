@@ -23,6 +23,7 @@ import {
 } from './storyEngine';
 import {
   clearDeadAirSave,
+  CORRUPTED_STORAGE_KEY_V3_BACKUP,
   isValidLegacySaveShape,
   isValidV3SaveShape,
   LEGACY_STORAGE_KEY_V1,
@@ -54,13 +55,14 @@ import {
   analyzePersistenceAndMetadata,
   analyzeTlsFingerprinting,
   computeCanonicalJa4,
+  parseDerEcdsaSignature,
   sha256Hex,
   verifyEcdsaP256Sha256,
 } from '../simulation/tacticalEngine';
 import { HSM_FORENSICS_FIXTURES } from '../simulation/tacticalFixtures/hsm.fixtures';
 import { TLS_FINGERPRINT_FIXTURES } from '../simulation/tacticalFixtures/tls.fixtures';
 
-describe('DEAD AIR V0.4.1 — Narrative Integrity, Workstation Access, Probe Integrity & Tactical Security Engineering', () => {
+describe('DEAD AIR V0.4.2 — Narrative Integrity, Workstation Access, Probe Integrity & Tactical Security Engineering', () => {
   it('1. initializes game state with saveVersion 3, APARTMENT_NIGHT at 02:17 AM, 0 discovered evidence, and 6 false tactical flags', () => {
     const state = createInitialDeadAirState('playing');
     assert.equal(state.saveVersion, 3);
@@ -1878,7 +1880,11 @@ describe('DEAD AIR V0.4.1 — Narrative Integrity, Workstation Access, Probe Int
       assert.equal(recoveredFromV2.currentScene, 'LAUNDROMAT');
       assert.equal(recoveredFromV2.flags.trust_nadia, 70);
       assert.equal(recoveredFromV2.flags.evidence_count, 3);
-      // V2 backup is preserved and V3 is updated with the valid migrated V3 save
+      // Malformed V3 is backed up under CORRUPTED_STORAGE_KEY_V3_BACKUP, V2 backup is preserved, and V3 is updated with the valid migrated V3 save
+      assert.equal(
+        store.get(CORRUPTED_STORAGE_KEY_V3_BACKUP),
+        malformedV3WithFlags
+      );
       assert.ok(store.get(LEGACY_STORAGE_KEY_V2));
       assert.equal(
         isValidV3SaveShape(JSON.parse(store.get(STORAGE_KEY_V3)!)),
@@ -1886,7 +1892,7 @@ describe('DEAD AIR V0.4.1 — Narrative Integrity, Workstation Access, Probe Int
       );
 
       // 7. Malformed V3 AND malformed V2 (both containing `flags`!) with valid V1 backup:
-      // Must continue past V3 and V2, migrate V1 -> V3, preserve V1 & V2, and write V3 after migration!
+      // Must continue past V3 and V2, migrate V1 -> V3, preserve V1 & V2, preserve malformed V3 in backup key, and write V3 after migration!
       store.clear();
       const malformedV2WithFlags = JSON.stringify({
         saveVersion: 2,
@@ -1904,6 +1910,10 @@ describe('DEAD AIR V0.4.1 — Narrative Integrity, Workstation Access, Probe Int
       assert.equal(recoveredFromV1.currentScene, 'STREET_NIGHT');
       assert.equal(recoveredFromV1.flags.trust_nadia, 62);
       assert.equal(recoveredFromV1.flags.first_choice, 'TRACE_SMS');
+      assert.equal(
+        store.get(CORRUPTED_STORAGE_KEY_V3_BACKUP),
+        malformedV3WithFlags
+      );
       assert.equal(store.get(LEGACY_STORAGE_KEY_V2), malformedV2WithFlags);
       assert.ok(store.get(LEGACY_STORAGE_KEY_V1));
       assert.equal(
@@ -1925,7 +1935,454 @@ describe('DEAD AIR V0.4.1 — Narrative Integrity, Workstation Access, Probe Int
       }
     }
   });
+
+  it('31. enforces strict canonical ASN.1 DER validation in parseDerEcdsaSignature and verifyEcdsaP256Sha256 (negative INTEGER, redundant leading zero, missing sign-protection zero, bad sequence length, trailing bytes)', () => {
+    const hsmFix = HSM_FORENSICS_FIXTURES['access_0427.log'];
+    const validSigHex = hsmFix.signatureEnvelopeHex;
+    // Valid 71-byte fixture signature:
+    // 30 45
+    //   02 21 00 f551afb0cec0965b9a428eb2dcbcf982cf4e3130944b1aad8bf403237b69e8ea
+    //   02 20 36148e217f1c2c109f6625feea996e64ad506ea8c2ffc70f1a798cf6c956908b
+    const rHex32 =
+      'f551afb0cec0965b9a428eb2dcbcf982cf4e3130944b1aad8bf403237b69e8ea';
+    const sHex32 =
+      '36148e217f1c2c109f6625feea996e64ad506ea8c2ffc70f1a798cf6c956908b';
+
+    const parsedValid = parseDerEcdsaSignature(validSigHex);
+    assert.ok(parsedValid !== null);
+    assert.equal(parsedValid.r, BigInt('0x' + rHex32));
+    assert.equal(parsedValid.s, BigInt('0x' + sHex32));
+    assert.equal(
+      verifyEcdsaP256Sha256(
+        hsmFix.signedPayloadRaw,
+        validSigHex,
+        hsmFix.publicKeyUncompressedHex
+      ),
+      true
+    );
+
+    // 1. Negative INTEGER encoding (s starts with 0x80 without leading 0x00)
+    const negativeS = `3045022100${rHex32}0220${'80' + sHex32.slice(2)}`;
+    assert.equal(parseDerEcdsaSignature(negativeS), null);
+    assert.equal(
+      verifyEcdsaP256Sha256(
+        hsmFix.signedPayloadRaw,
+        negativeS,
+        hsmFix.publicKeyUncompressedHex
+      ),
+      false
+    );
+
+    // 2. Missing required sign-protection zero on r (r starts with 0xf5 >= 0x80 encoded as 32-byte 02 20 f5... instead of 02 21 00 f5...)
+    const missingSignProtectionZeroR = `30440220${rHex32}0220${sHex32}`;
+    assert.equal(parseDerEcdsaSignature(missingSignProtectionZeroR), null);
+    assert.equal(
+      verifyEcdsaP256Sha256(
+        hsmFix.signedPayloadRaw,
+        missingSignProtectionZeroR,
+        hsmFix.publicKeyUncompressedHex
+      ),
+      false
+    );
+
+    // 3. Redundant leading zero on s (s starts with 0x36 < 0x80, so prepending 0x00 as 02 21 00 36... is non-canonical DER)
+    const redundantLeadingZeroS = `3046022100${rHex32}022100${sHex32}`;
+    assert.equal(parseDerEcdsaSignature(redundantLeadingZeroS), null);
+    assert.equal(
+      verifyEcdsaP256Sha256(
+        hsmFix.signedPayloadRaw,
+        redundantLeadingZeroS,
+        hsmFix.publicKeyUncompressedHex
+      ),
+      false
+    );
+
+    // 4. Redundant double leading zero on r (02 22 00 00 f5...)
+    const redundantDoubleZeroR = `304602220000${rHex32}0220${sHex32}`;
+    assert.equal(parseDerEcdsaSignature(redundantDoubleZeroR), null);
+
+    // 5. Incorrect ASN.1 SEQUENCE length (declared 0x44 or 0x46 when body is 0x45 = 69 bytes)
+    const seqLenTooShort = `3044022100${rHex32}0220${sHex32}`;
+    const seqLenTooLong = `3046022100${rHex32}0220${sHex32}`;
+    assert.equal(parseDerEcdsaSignature(seqLenTooShort), null);
+    assert.equal(parseDerEcdsaSignature(seqLenTooLong), null);
+    assert.equal(
+      verifyEcdsaP256Sha256(
+        hsmFix.signedPayloadRaw,
+        seqLenTooShort,
+        hsmFix.publicKeyUncompressedHex
+      ),
+      false
+    );
+
+    // 6. Extra trailing bytes after s (even if outer or inner lengths are manipulated)
+    const trailingBytesAfterSeq = `${validSigHex}00`;
+    const trailingBytesInsideSeq = `3046022100${rHex32}0220${sHex32}00`;
+    assert.equal(parseDerEcdsaSignature(trailingBytesAfterSeq), null);
+    assert.equal(parseDerEcdsaSignature(trailingBytesInsideSeq), null);
+    assert.equal(
+      verifyEcdsaP256Sha256(
+        hsmFix.signedPayloadRaw,
+        trailingBytesAfterSeq,
+        hsmFix.publicKeyUncompressedHex
+      ),
+      false
+    );
+    assert.equal(
+      verifyEcdsaP256Sha256(
+        hsmFix.signedPayloadRaw,
+        trailingBytesInsideSeq,
+        hsmFix.publicKeyUncompressedHex
+      ),
+      false
+    );
+  });
+
+  it('32. gates handleHsmVerify (CLI & GUI) on actual ECDSA cryptographic verification and enforces the evidentiary attribution boundary', () => {
+    const baseState = createInitialDeadAirState('playing');
+    const unlockedState = {
+      ...baseState,
+      learning: {
+        ...baseState.learning,
+        unlockedCapabilities: ['hsm_verifier' as const],
+        unlockedTools: ['hsm-verify'],
+      },
+    };
+
+    const initialSuspicion = unlockedState.flags.corporate_suspicion; // 15
+    const initialTrust = unlockedState.flags.trust_nadia; // 55
+
+    // 1. Command-level negative test via CLI signature override:
+    const badSigState = executeDeadAirCommand(
+      unlockedState,
+      'hsm-verify access_0427.log --sig 3045022100deadbeef'
+    );
+    assert.equal(badSigState.flags.hsm_signature_verified, false);
+    assert.equal(
+      badSigState.completedEvents.includes('event:tactical:hsm_verified'),
+      false
+    );
+    assert.equal(
+      badSigState.learning.appliedStoryLessons.includes(
+        'lesson_11_hsm_forensics'
+      ),
+      false
+    );
+    assert.equal(badSigState.flags.corporate_suspicion, initialSuspicion);
+    assert.equal(badSigState.flags.trust_nadia, initialTrust);
+    assert.match(badSigState.lastFeedbackBanner || '', /HSM-VERIFY FAILED/);
+    const badSigTerminalText = badSigState.terminalHistory
+      .map((l) => l.text)
+      .join('\n');
+    assert.match(
+      badSigTerminalText,
+      /Cryptographic signature verification failed/
+    );
+    assert.doesNotMatch(badSigTerminalText, /\[HSM-VERIFY COMPLETE\]/);
+
+    // 2. Command-level negative test when fixture signature is corrupted (affecting bare `hsm-verify access_0427.log` and GUI `applyLessonCapabilityToStory`):
+    const origSig = HSM_FORENSICS_FIXTURES['access_0427.log'].signatureEnvelopeHex;
+    try {
+      HSM_FORENSICS_FIXTURES['access_0427.log'].signatureEnvelopeHex =
+        origSig.slice(0, -4) + '9999';
+
+      const failedAnalysis = analyzeHsmAndKeyring();
+      assert.equal(
+        failedAnalysis.verificationBreakdown.signatureMathValid,
+        false
+      );
+      assert.match(
+        failedAnalysis.report.technicalInference,
+        /Cryptographic signature verification failed/
+      );
+      assert.match(
+        failedAnalysis.report.technicalInferenceZh,
+        /密码学签名验算未通过/
+      );
+
+      const failedCli = executeDeadAirCommand(
+        unlockedState,
+        'hsm-verify access_0427.log'
+      );
+      assert.equal(failedCli.flags.hsm_signature_verified, false);
+      assert.equal(
+        failedCli.completedEvents.includes('event:tactical:hsm_verified'),
+        false
+      );
+      assert.equal(
+        failedCli.learning.appliedStoryLessons.includes(
+          'lesson_11_hsm_forensics'
+        ),
+        false
+      );
+      assert.equal(failedCli.flags.corporate_suspicion, initialSuspicion);
+      assert.equal(failedCli.flags.trust_nadia, initialTrust);
+      assert.equal(
+        failedCli.terminalHistory[failedCli.terminalHistory.length - 1].tone,
+        'error'
+      );
+
+      const failedGui = applyLessonCapabilityToStory(
+        unlockedState,
+        'lesson_11_hsm_forensics',
+        'analytical'
+      );
+      assert.equal(failedGui.flags.hsm_signature_verified, false);
+      assert.equal(failedGui.flags.corporate_suspicion, initialSuspicion);
+      assert.equal(failedGui.flags.trust_nadia, initialTrust);
+    } finally {
+      HSM_FORENSICS_FIXTURES['access_0427.log'].signatureEnvelopeHex = origSig;
+    }
+
+    // 3. Command-level positive test & idempotency + evidentiary attribution boundary checks:
+    const validAnalysis = analyzeHsmAndKeyring();
+    assert.equal(validAnalysis.verificationBreakdown.signatureMathValid, true);
+    assert.match(
+      validAnalysis.report.technicalInference,
+      /Cryptographic fact: signature validates against the fixture public key/
+    );
+    assert.match(
+      validAnalysis.report.technicalInference,
+      /Fixture metadata: key label is M_HALE_SEC_01, owner metadata says Director Marcus Hale/
+    );
+    assert.match(
+      validAnalysis.report.technicalInference,
+      /Hardware attestation: missing/
+    );
+    assert.match(
+      validAnalysis.report.technicalInference,
+      /Real-world custody\/ownership: not independently established/
+    );
+
+    const passedCli = executeDeadAirCommand(
+      unlockedState,
+      'hsm-verify access_0427.log'
+    );
+    assert.equal(passedCli.flags.hsm_signature_verified, true);
+    assert.ok(
+      passedCli.completedEvents.includes('event:tactical:hsm_verified')
+    );
+    assert.ok(
+      passedCli.learning.appliedStoryLessons.includes('lesson_11_hsm_forensics')
+    );
+    assert.equal(passedCli.flags.corporate_suspicion, initialSuspicion - 5);
+    assert.equal(passedCli.flags.trust_nadia, initialTrust + 10);
+
+    // Repeating valid `hsm-verify access_0427.log` is idempotent
+    const repeatedCli = executeDeadAirCommand(
+      passedCli,
+      'hsm-verify access_0427.log'
+    );
+    assert.equal(repeatedCli.flags.corporate_suspicion, initialSuspicion - 5);
+    assert.equal(repeatedCli.flags.trust_nadia, initialTrust + 10);
+  });
+
+  it('33. enforces deep element-level save validation across all 10 state collections, falls back to V2/V1 when V3 contains malformed array elements, and preserves the exact malformed V3 payload in CORRUPTED_STORAGE_KEY_V3_BACKUP', () => {
+    const validV3 = createInitialDeadAirState('playing');
+    assert.equal(isValidV3SaveShape(validV3), true);
+
+    const validV2Backup = {
+      saveVersion: 2,
+      shellState: 'playing',
+      currentScene: 'LAUNDROMAT',
+      unlockedScenes: ['APARTMENT_NIGHT', 'STREET_NIGHT', 'LAUNDROMAT'],
+      clockTime: '02:55 AM',
+      currentDir: '/home/eli/Documents',
+      terminalHistory: [
+        { id: 't-1', text: 'eli@greyos:~$ ls', tone: 'command' },
+      ],
+      completedEvents: ['event:first_phone_choice'],
+      inspectedFiles: ['/home/eli/Downloads/incident_0427/ntp_override.conf'],
+      flags: {
+        trust_nadia: 74,
+        corporate_suspicion: 15,
+        player_exposure: 10,
+      },
+      evidence: [
+        { id: 'EV-01', discovered: true, correlated: true },
+        { id: 'EV-02', discovered: true, correlated: true },
+      ],
+      files: [
+        {
+          name: 'incident_0427_brief.clean.pdf',
+          path: '/home/eli/Documents/incident_0427_brief.clean.pdf',
+          parentDir: '/home/eli/Documents',
+          size: '398.4 KB',
+          modifiedAt: 'Just now (Sanitized Copy)',
+          unlocked: true,
+          content: '%PDF-1.7 [SANITIZED FORENSIC COPY]',
+        },
+      ],
+      characters: [{ id: 'nadia', trust: 74, currentNodeId: 'nadia_node_1' }],
+      inventory: [{ id: 'item_moth_usb', acquired: true }],
+    };
+
+    const validV1Backup = {
+      shellState: 'playing',
+      currentScene: 'STREET_NIGHT',
+      clockTime: '02:41 AM',
+      flags: {
+        trust_nadia: 63,
+        corporate_suspicion: 20,
+        player_exposure: 22,
+      },
+      evidence: [{ id: 'EV-01', discovered: true, correlated: true }],
+      files: [],
+      characters: [{ id: 'nadia', trust: 63, currentNodeId: 'nadia_node_1' }],
+      inventory: [{ id: 'item_moth_usb', acquired: false }],
+    };
+
+    // Construct malformed V3 candidates where top-level arrays/objects exist but individual elements are malformed
+    const malformedV3Cases: Array<{
+      name: string;
+      mutator: (base: ReturnType<typeof createInitialDeadAirState>) => unknown;
+    }> = [
+      {
+        name: 'evidence: [{}]',
+        mutator: (b) => ({ ...b, evidence: [{}] }),
+      },
+      {
+        name: 'files: [{}]',
+        mutator: (b) => ({ ...b, files: [{}] }),
+      },
+      {
+        name: 'characters: [{}]',
+        mutator: (b) => ({ ...b, characters: [{}] }),
+      },
+      {
+        name: 'inventory: [{}]',
+        mutator: (b) => ({ ...b, inventory: [{}] }),
+      },
+      {
+        name: 'networkHosts: [{}]',
+        mutator: (b) => ({ ...b, networkHosts: [{}] }),
+      },
+      {
+        name: 'completedEvents: [123]',
+        mutator: (b) => ({ ...b, completedEvents: [123] }),
+      },
+      {
+        name: 'inspectedFiles: ["relative_no_slash.txt"]',
+        mutator: (b) => ({ ...b, inspectedFiles: ['relative_no_slash.txt'] }),
+      },
+      {
+        name: 'terminalHistory: [{}] (malformed terminal history entry)',
+        mutator: (b) => ({ ...b, terminalHistory: [{}] }),
+      },
+      {
+        name: 'hotspots.APARTMENT_NIGHT: [{}] (malformed hotspot entry)',
+        mutator: (b) => ({
+          ...b,
+          hotspots: { ...b.hotspots, APARTMENT_NIGHT: [{}] },
+        }),
+      },
+      {
+        name: 'learning.unlockedCapabilities: ["invalid_capability"]',
+        mutator: (b) => ({
+          ...b,
+          learning: {
+            ...b.learning,
+            unlockedCapabilities: ['invalid_capability'],
+          },
+        }),
+      },
+    ];
+
+    const store = new Map<string, string>();
+    const prevWindow = (globalThis as unknown as { window?: unknown }).window;
+    (globalThis as unknown as { window: unknown }).window = {
+      location: { search: '?autostart=1' },
+      localStorage: {
+        getItem: (k: string) => (store.has(k) ? store.get(k)! : null),
+        setItem: (k: string, v: string) => {
+          store.set(k, String(v));
+        },
+        removeItem: (k: string) => {
+          store.delete(k);
+        },
+      },
+    };
+
+    try {
+      for (const testCase of malformedV3Cases) {
+        const candidateObj = testCase.mutator(
+          JSON.parse(JSON.stringify(validV3))
+        );
+        const rawMalformedV3 = JSON.stringify(candidateObj);
+        assert.equal(
+          isValidV3SaveShape(candidateObj),
+          false,
+          `Expected isValidV3SaveShape to reject ${testCase.name}`
+        );
+
+        // Case A: Malformed V3 + Valid V2 backup -> falls back to V2, preserves exact malformed V3 in CORRUPTED_STORAGE_KEY_V3_BACKUP, preserves V2, and preserves clean PDF!
+        store.clear();
+        const rawV2String = JSON.stringify(validV2Backup);
+        store.set(STORAGE_KEY_V3, rawMalformedV3);
+        store.set(LEGACY_STORAGE_KEY_V2, rawV2String);
+
+        const restoredFromV2 = loadDeadAirState();
+        assert.equal(
+          restoredFromV2.currentScene,
+          'LAUNDROMAT',
+          `Fallback to V2 failed for ${testCase.name}`
+        );
+        assert.equal(restoredFromV2.flags.trust_nadia, 74);
+        assert.ok(
+          restoredFromV2.files.some(
+            (f) =>
+              f.path === '/home/eli/Documents/incident_0427_brief.clean.pdf'
+          ),
+          `Clean PDF dynamic file should be preserved when migrating V2 for ${testCase.name}`
+        );
+        assert.equal(
+          store.get(CORRUPTED_STORAGE_KEY_V3_BACKUP),
+          rawMalformedV3,
+          `Exact malformed V3 payload must be preserved in CORRUPTED_STORAGE_KEY_V3_BACKUP for ${testCase.name}`
+        );
+        assert.equal(
+          store.get(LEGACY_STORAGE_KEY_V2),
+          rawV2String,
+          `Original V2 backup must not be modified or deleted for ${testCase.name}`
+        );
+        assert.equal(
+          isValidV3SaveShape(JSON.parse(store.get(STORAGE_KEY_V3)!)),
+          true
+        );
+
+        // Case B: Malformed V3 + Malformed V2 + Valid V1 backup -> falls back to V1, preserves exact malformed V3 in CORRUPTED_STORAGE_KEY_V3_BACKUP, preserves V1!
+        store.clear();
+        const rawV1String = JSON.stringify(validV1Backup);
+        const rawMalformedV2 = JSON.stringify({
+          ...validV2Backup,
+          evidence: [{}],
+        });
+        assert.equal(isValidLegacySaveShape(JSON.parse(rawMalformedV2)), false);
+
+        store.set(STORAGE_KEY_V3, rawMalformedV3);
+        store.set(LEGACY_STORAGE_KEY_V2, rawMalformedV2);
+        store.set(LEGACY_STORAGE_KEY_V1, rawV1String);
+
+        const restoredFromV1 = loadDeadAirState();
+        assert.equal(
+          restoredFromV1.currentScene,
+          'STREET_NIGHT',
+          `Fallback to V1 failed for ${testCase.name}`
+        );
+        assert.equal(restoredFromV1.flags.trust_nadia, 63);
+        assert.equal(
+          store.get(CORRUPTED_STORAGE_KEY_V3_BACKUP),
+          rawMalformedV3
+        );
+        assert.equal(store.get(LEGACY_STORAGE_KEY_V2), rawMalformedV2);
+        assert.equal(store.get(LEGACY_STORAGE_KEY_V1), rawV1String);
+      }
+    } finally {
+      if (prevWindow === undefined) {
+        delete (globalThis as unknown as { window?: unknown }).window;
+      } else {
+        (globalThis as unknown as { window: unknown }).window = prevWindow;
+      }
+    }
+  });
 });
-
-
-

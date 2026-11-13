@@ -28,6 +28,7 @@ interface CinematicSceneViewProps {
   onOpenPhone: () => void;
   onOpenComputer: () => void;
   onOpenJournal: () => void;
+  onOpenFieldManual: () => void;
   onTransitionScene: (scene: SceneId, forceDebug?: boolean) => void;
   onToggleSound: () => void;
   onToggleDebugMode: () => void;
@@ -76,6 +77,7 @@ export const CinematicSceneView: React.FC<CinematicSceneViewProps> = ({
   onOpenPhone,
   onOpenComputer,
   onOpenJournal,
+  onOpenFieldManual,
   onTransitionScene,
   onToggleSound,
   onToggleDebugMode,
@@ -788,6 +790,19 @@ export const CinematicSceneView: React.FC<CinematicSceneViewProps> = ({
             <span>FORENSIC TIMELINE &amp; NOTES [J]</span>
             <span className="text-[#4FA3B8] tabular-nums">
               ({state.flags.evidence_count}/6)
+            </span>
+          </button>
+
+          <button
+            type="button"
+            data-testid="hud-manual-btn"
+            onClick={onOpenFieldManual}
+            className="flex items-center gap-2 px-4 py-2 rounded border border-[#469A6C]/50 bg-[#12171D] hover:border-[#469A6C] text-xs font-mono text-[#E3E7EB] transition cursor-pointer"
+          >
+            <BookOpen className="w-4 h-4 text-[#469A6C]" />
+            <span>FIELD MANUAL &amp; NETLAB [M]</span>
+            <span className="text-[#469A6C] tabular-nums">
+              ({state.learning.completedLessonIds.length}/7)
             </span>
           </button>
         </div>

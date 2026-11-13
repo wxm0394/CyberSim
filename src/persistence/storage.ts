@@ -3,6 +3,7 @@ import {
   CURRENT_SAVE_VERSION,
   createInitialDeadAirState,
 } from '../data/storyData';
+import { migrateLearningState } from '../learning/learningProgress';
 
 const STORAGE_KEY_V2 = 'dead_air_save_v2';
 const LEGACY_STORAGE_KEY_V1 = 'dead_air_save_v1';
@@ -165,6 +166,25 @@ export function migrateDeadAirSave(
       ? { ...candidate.resolvedDialogueNodes }
       : {};
 
+  // Merge virtual network hosts state
+  const migratedNetworkHosts = base.networkHosts.map((baseHost) => {
+    const savedHost = candidate.networkHosts?.find((h) => h.ip === baseHost.ip);
+    if (!savedHost) return baseHost;
+    return {
+      ...baseHost,
+      discovered: Boolean(savedHost.discovered || baseHost.discovered),
+      scanned: Boolean(savedHost.scanned),
+      privilege: savedHost.privilege || baseHost.privilege,
+      compromised: Boolean(savedHost.compromised),
+      actionCompleted: Boolean(savedHost.actionCompleted),
+    };
+  });
+
+  const compromisedHostsCount = migratedNetworkHosts.filter(
+    (h) => h.compromised && h.ip !== '10.0.2.15'
+  ).length;
+  const cameraScrubbed = Boolean(candidate.flags.camera_scrubbed);
+
   return {
     ...base,
     saveVersion: CURRENT_SAVE_VERSION,
@@ -177,6 +197,8 @@ export function migrateDeadAirSave(
     unlockedScenes,
     activeOverlay: 'NONE',
     activeComputerApp: candidate.activeComputerApp || 'FILES',
+    selectedNetworkHostIp:
+      candidate.selectedNetworkHostIp || base.selectedNetworkHostIp,
     clockTime: candidate.clockTime || base.clockTime,
     monologueBanner: candidate.monologueBanner || base.monologueBanner,
     lastFeedbackBanner: null,
@@ -201,20 +223,30 @@ export function migrateDeadAirSave(
         candidate.flags.soc_warning_triggered ||
           (candidate.flags.corporate_suspicion ?? 0) >= 25
       ),
-      camera_tracking_risk: Boolean(
-        candidate.flags.camera_tracking_risk ||
-          (candidate.flags.player_exposure ?? 0) >= 20
-      ),
-      camera_tracked: Boolean(candidate.flags.camera_tracked),
+      camera_tracking_risk: cameraScrubbed
+        ? false
+        : Boolean(
+            candidate.flags.camera_tracking_risk ||
+              (candidate.flags.player_exposure ?? 0) >= 20
+          ),
+      camera_tracked: cameraScrubbed
+        ? false
+        : Boolean(candidate.flags.camera_tracked),
+      relay_tunnel_active: Boolean(candidate.flags.relay_tunnel_active),
+      camera_scrubbed: cameraScrubbed,
+      counter_proof_secured: Boolean(candidate.flags.counter_proof_secured),
+      compromised_hosts_count: compromisedHostsCount,
     },
     hotspots: migratedHotspots,
     evidence: migratedEvidence,
     files: migratedFiles,
+    networkHosts: migratedNetworkHosts,
     inventory: migratedInventory,
     characters: migratedCharacters,
     phoneMessages: Array.isArray(candidate.phoneMessages)
       ? candidate.phoneMessages
       : base.phoneMessages,
+    learning: migrateLearningState(candidate.learning),
   };
 }
 

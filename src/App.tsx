@@ -24,18 +24,30 @@ import {
   inspectVirtualFile,
   correlateEvidenceTimeline,
   selectCharacterDialogueChoice,
+  selectNetworkHost,
   executeDeadAirCommand,
   openPhoneOverlay,
   openWorkstationOverlay,
   toggleWorkstationOverlay,
   resolveChapterOneEnding,
 } from './game/storyEngine';
+import {
+  selectLearningCategory,
+  selectLearningLesson,
+  openNetworkLabForLesson,
+  closeNetworkLab,
+  executeLabDiagnosticStep,
+  submitLabResolution,
+  applyLessonCapabilityToStory,
+} from './learning/learningEngine';
+import { KnowledgeCategoryId } from './learning/lessonTypes';
 import { CHAPTER_ONE_ENDINGS } from './data/storyData';
 import { TitleScreen } from './components/TitleScreen';
 import { CinematicSceneView } from './scenes/CinematicSceneView';
 import { PhoneOverlay } from './ui/PhoneOverlay';
 import { DialogueOverlay } from './ui/DialogueOverlay';
 import { JournalModal } from './ui/JournalModal';
+import { KnowledgeCodex } from './ui/KnowledgeCodex';
 import { VirtualDesktopModal } from './computer/VirtualDesktopModal';
 import { ForensicTimelineView } from './components/ForensicTimelineView';
 import { RotateCcw, Eye, CheckCircle2, ShieldAlert, Users } from 'lucide-react';
@@ -118,6 +130,13 @@ export default function App() {
             activeOverlay:
               prev.activeOverlay === 'JOURNAL' ? 'NONE' : 'JOURNAL',
           }));
+        } else if (e.key === 'm' || e.key === 'M') {
+          soundFX.playTone('click', state.soundEnabled);
+          setState((prev) => ({
+            ...prev,
+            activeOverlay:
+              prev.activeOverlay === 'FIELD_MANUAL' ? 'NONE' : 'FIELD_MANUAL',
+          }));
         }
       }
     };
@@ -173,6 +192,57 @@ export default function App() {
     setState((prev) => ({ ...prev, activeComputerApp: app }));
   };
 
+  const onSelectNetworkHost = (ip: string) => {
+    soundFX.playTone('click', state.soundEnabled);
+    setState((prev) => selectNetworkHost(prev, ip));
+  };
+
+  const onSelectLearningCategoryHandler = (
+    category: KnowledgeCategoryId | 'all'
+  ) => {
+    soundFX.playTone('click', state.soundEnabled);
+    setState((prev) => selectLearningCategory(prev, category));
+  };
+
+  const onSelectLearningLessonHandler = (lessonId: string) => {
+    soundFX.playTone('click', state.soundEnabled);
+    setState((prev) => selectLearningLesson(prev, lessonId));
+  };
+
+  const onOpenNetworkLabHandler = (lessonId: string) => {
+    soundFX.playTone('terminal', state.soundEnabled);
+    setState((prev) => openNetworkLabForLesson(prev, lessonId));
+  };
+
+  const onCloseNetworkLabHandler = () => {
+    soundFX.playTone('click', state.soundEnabled);
+    setState((prev) => closeNetworkLab(prev));
+  };
+
+  const onExecuteLabDiagnosticHandler = (
+    lessonId: string,
+    diagnosticId: string
+  ) => {
+    soundFX.playTone('terminal', state.soundEnabled);
+    setState((prev) => executeLabDiagnosticStep(prev, lessonId, diagnosticId));
+  };
+
+  const onSubmitLabResolutionHandler = (
+    lessonId: string,
+    resolutionId: string
+  ) => {
+    soundFX.playTone('evidence', state.soundEnabled);
+    setState((prev) => submitLabResolution(prev, lessonId, resolutionId));
+  };
+
+  const onApplyLessonToStoryHandler = (
+    lessonId: string,
+    mode: 'analytical' | 'brute_force'
+  ) => {
+    soundFX.playTone('evidence', state.soundEnabled);
+    setState((prev) => applyLessonCapabilityToStory(prev, lessonId, mode));
+  };
+
   const hasSavedProgress =
     state.flags.evidence_count > 0 ||
     state.flags.voicemail_played ||
@@ -210,6 +280,10 @@ export default function App() {
         onOpenJournal={() => {
           soundFX.playTone('click', state.soundEnabled);
           setState((prev) => ({ ...prev, activeOverlay: 'JOURNAL' }));
+        }}
+        onOpenFieldManual={() => {
+          soundFX.playTone('click', state.soundEnabled);
+          setState((prev) => ({ ...prev, activeOverlay: 'FIELD_MANUAL' }));
         }}
         onTransitionScene={onTransitionScene}
         onToggleSound={handleToggleSound}
@@ -256,6 +330,30 @@ export default function App() {
         />
       )}
 
+      {/* Standalone Field Manual & Network Lab Overlay [M] */}
+      {state.activeOverlay === 'FIELD_MANUAL' && (
+        <div
+          data-testid="field-manual-overlay"
+          className="fixed inset-0 z-40 flex items-center justify-center bg-black/85 backdrop-blur-sm p-3 md:p-6"
+        >
+          <div className="w-full max-w-6xl h-[88vh] rounded-lg border border-[#469A6C]/50 bg-[#080B0E] shadow-2xl overflow-hidden flex flex-col">
+            <KnowledgeCodex
+              state={state}
+              onSelectCategory={onSelectLearningCategoryHandler}
+              onSelectLesson={onSelectLearningLessonHandler}
+              onOpenLab={onOpenNetworkLabHandler}
+              onCloseLab={onCloseNetworkLabHandler}
+              onExecuteDiagnostic={onExecuteLabDiagnosticHandler}
+              onSubmitResolution={onSubmitLabResolutionHandler}
+              onApplyToStory={onApplyLessonToStoryHandler}
+              onCloseOverlay={() =>
+                setState((prev) => ({ ...prev, activeOverlay: 'NONE' }))
+              }
+            />
+          </div>
+        </div>
+      )}
+
       {/* Diegetic In-World Workstation OS Overlay (Strictly guarded to Apartment 4B scenes) */}
       {state.activeOverlay === 'COMPUTER' && canAccessWorkstation(state) && (
         <VirtualDesktopModal
@@ -264,6 +362,14 @@ export default function App() {
           onInspectFile={onInspectFile}
           onExecuteCommand={onExecuteCommand}
           onCorrelateTimeline={onCorrelateTimeline}
+          onSelectNetworkHost={onSelectNetworkHost}
+          onSelectLearningCategory={onSelectLearningCategoryHandler}
+          onSelectLearningLesson={onSelectLearningLessonHandler}
+          onOpenNetworkLab={onOpenNetworkLabHandler}
+          onCloseNetworkLab={onCloseNetworkLabHandler}
+          onExecuteLabDiagnostic={onExecuteLabDiagnosticHandler}
+          onSubmitLabResolution={onSubmitLabResolutionHandler}
+          onApplyLessonToStory={onApplyLessonToStoryHandler}
           onClose={() =>
             setState((prev) => ({ ...prev, activeOverlay: 'NONE' }))
           }
@@ -375,6 +481,34 @@ export default function App() {
                   <div className="text-[#8E98A4]">MOTH CONTACTED</div>
                   <div className="text-sm font-semibold text-[#D89B3C] mt-1">
                     {state.flags.contacted_moth ? 'ACTIVE' : 'UNREAD'}
+                  </div>
+                </div>
+                <div className="p-3 rounded border border-white/10 bg-[#12171D]">
+                  <div className="text-[#8E98A4]">HOSTS COMPROMISED</div>
+                  <div className="text-sm font-semibold text-[#469A6C] mt-1">
+                    {state.flags.compromised_hosts_count} / 3
+                  </div>
+                </div>
+                <div className="p-3 rounded border border-white/10 bg-[#12171D]">
+                  <div className="text-[#8E98A4]">DARK-FIBER PROXY</div>
+                  <div className="text-sm font-semibold text-[#4FA3B8] mt-1">
+                    {state.flags.relay_tunnel_active ? 'ROUTED (-10% EXP)' : 'DIRECT'}
+                  </div>
+                </div>
+                <div className="p-3 rounded border border-white/10 bg-[#12171D]">
+                  <div className="text-[#8E98A4]">CAMERA #04 NVRAM</div>
+                  <div className="text-sm font-semibold text-[#469A6C] mt-1">
+                    {state.flags.camera_scrubbed
+                      ? 'SCRUBBED'
+                      : state.flags.camera_tracked
+                      ? 'GAIT LOCKED'
+                      : 'UNTOUCHED'}
+                  </div>
+                </div>
+                <div className="p-3 rounded border border-white/10 bg-[#12171D]">
+                  <div className="text-[#8E98A4]">KEYRING COUNTER-PROOF</div>
+                  <div className="text-sm font-semibold text-[#4FA3B8] mt-1">
+                    {state.flags.counter_proof_secured ? 'SECURED (M. HALE)' : 'MISSING'}
                   </div>
                 </div>
               </div>

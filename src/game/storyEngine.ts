@@ -10,6 +10,8 @@ import {
   TerminalOutputLine,
   VirtualFileEntry,
 } from './types';
+import { applyCapabilityByCommandName } from '../learning/learningEngine';
+import { ALL_LEARNING_LESSONS } from '../data/learningMissions';
 
 function makeTermLine(
   text: string,
@@ -83,11 +85,41 @@ function syncCharactersAndFlags(state: DeadAirState): DeadAirState {
 
   const socWarningTriggered =
     state.flags.soc_warning_triggered || suspicion >= 25;
-  const cameraTrackingRisk = exposure >= 20;
+
+  const ev1Or2Discovered = state.evidence.some(
+    (e) => (e.id === 'EV-01' || e.id === 'EV-02') && e.discovered
+  );
+  const ev3Discovered = state.evidence.some(
+    (e) => e.id === 'EV-03' && e.discovered
+  );
+  const enclaveProbed = state.completedEvents.includes(
+    'event:active_probe:10.88.14.9'
+  );
+
+  const updatedNetworkHosts = (state.networkHosts || []).map((host) => {
+    if (host.ip === '10.88.4.22' && (ev1Or2Discovered || ev3Discovered)) {
+      return { ...host, discovered: true };
+    }
+    if (host.ip === '10.88.14.9' && (ev3Discovered || enclaveProbed)) {
+      return { ...host, discovered: true };
+    }
+    return host;
+  });
+
+  const compromisedCount = updatedNetworkHosts.filter(
+    (h) => h.compromised && h.ip !== '10.0.2.15'
+  ).length;
+
+  const cameraScrubbed = Boolean(state.flags.camera_scrubbed);
+  const cameraTracked = cameraScrubbed
+    ? false
+    : Boolean(state.flags.camera_tracked);
+  const cameraTrackingRisk = cameraScrubbed ? false : exposure >= 20;
 
   return {
     ...state,
     characters: updatedCharacters,
+    networkHosts: updatedNetworkHosts,
     flags: {
       ...state.flags,
       trust_nadia: nadiaTrust,
@@ -96,7 +128,9 @@ function syncCharactersAndFlags(state: DeadAirState): DeadAirState {
       evidence_count: discoveredCount,
       soc_warning_triggered: socWarningTriggered,
       camera_tracking_risk: cameraTrackingRisk,
-      camera_tracked: Boolean(state.flags.camera_tracked),
+      camera_tracked: cameraTracked,
+      camera_scrubbed: cameraScrubbed,
+      compromised_hosts_count: compromisedCount,
     },
   };
 }
@@ -153,6 +187,18 @@ export function toggleWorkstationOverlay(state: DeadAirState): DeadAirState {
     };
   }
   return openWorkstationOverlay(state);
+}
+
+export function selectNetworkHost(
+  state: DeadAirState,
+  ip: string
+): DeadAirState {
+  const exists = state.networkHosts.some((h) => h.ip === ip);
+  if (!exists) return state;
+  return {
+    ...state,
+    selectedNetworkHostIp: ip,
+  };
 }
 
 export function canAccessVirtualFile(
@@ -427,9 +473,17 @@ export function inspectHotspot(
     };
   }
 
-  // Street camera consequence: if player_exposure >= 20 (camera_tracking_risk), inspecting camera triggers active optical lock!
+  // Street camera consequence: if player_exposure >= 20 (camera_tracking_risk) and camera buffer not scrubbed, inspecting camera triggers active optical lock!
   if (hotspotId === 'hs_camera' && isFirstInspection) {
-    if (nextState.flags.player_exposure >= 20) {
+    if (nextState.flags.camera_scrubbed) {
+      nextState = {
+        ...nextState,
+        lastFeedbackBanner:
+          'COUNTER-SURVEILLANCE ACTIVE: Optical Pole #04 NVRAM was scrubbed earlier—your gait & IMEI passed undetected.',
+        monologueBanner:
+          'Municipal Pole #04 sweeps the wet crosswalk, but its local NVRAM buffer was wiped by your earlier hack on 10.40.4.18. No telemetry alert triggered.',
+      };
+    } else if (nextState.flags.player_exposure >= 20) {
       nextState = {
         ...nextState,
         flags: {
@@ -1098,7 +1152,8 @@ export function executeDeadAirCommand(
         cmdLine,
         makeTermLine(
           [
-            'GreyOS 6.4 Forensics Shell — Supported Commands:',
+            'GreyOS 6.4 Forensics & Intrusion Shell — Supported Commands:',
+            '  [FILE & TIMELINE FORENSICS]',
             '  ls                       List directory contents and forensic status',
             '  cd <dir>                 Change working directory (/home/eli/Downloads/incident_0427, /home/eli/archive_vault)',
             '  cat <file>               Display file contents and record forensic evidence',
@@ -1106,15 +1161,704 @@ export function executeDeadAirCommand(
             '  grep <pattern> <file>    Search file lines matching pattern',
             '  unzip incident_0427.zip  Verify and unpack archive contents',
             '  verify / timeline        Correlate discovered evidence chronologically (requires >= 2 artifacts)',
-            '  probe <target_ip>        Active subnet reconnaissance (WARNING: high IDS trace risk)',
-            '  status                   Show Eli Ward exposure, suspicion & chapter prerequisites',
-            '  whoami                   Show current operator identity',
-            '  clear                    Clear terminal scrollback',
+            '',
+            '  [VIRTUAL NETWORK & HOST INTRUSION (V0.3)]',
+            '  netmap / hosts           Display discovered virtual network topology, IPs & privilege levels',
+            '  nmap <ip_or_host>        Scan target host ports, service banners & vulnerability vectors',
+            '  exploit <ip> / ssh <ip>  Authenticate or exploit service flaw using discovered forensic credentials',
+            '  logs <ip>                Read remote /var/log/* telemetry on a compromised host',
+            '  pivot 172.16.40.12       Route workstation traffic through Port District SIP relay (-10% Exposure)',
+            '  scrub 10.40.4.18         Wipe gait & IMEI watchlist from Municipal Camera #04 (-10% Exposure, -5% Suspicion)',
+            '  dump 10.88.4.22          Extract Marcus Hale keyring forgery proof from Vespera Edge Gateway (-5% Suspicion)',
+            '  probe <target_ip>        Raw SYN probe (WARNING: probing 10.88.14.9 trips Vespera SOC honey-trap)',
+            '',
+            '  [FIELD MANUAL & KNOWLEDGE LAB TOOLS (fq-book Curriculum)]',
+            '  manual / codex           List Field Manual & Network Lab modules and unlocked capabilities',
+            '  dns-inspect              Apply Resolver Inspector to purge Vespera DNS sinkhole hook (Level 02)',
+            '  cert-verify              Apply Certificate Analyzer to strip rogue Vespera MITM root CA (Level 03)',
+            '  route-apply              Apply Proxy Route Editor for WireGuard + SOCKS5h tunnel (Level 04)',
+            '  packet-inspect           Apply Packet & Port Inspector for quiet transport fingerprinting (Level 01)',
+            '  topo-map                 Apply Topology Mapper for Host-Only VM sandbox & NAT mapping (Level 05)',
+            '  ipfs-verify              Apply Archive Verifier to pin SHA-256 CID of audit ledger (Level 06)',
+            '  archive-search           Apply Archive Search & OPSEC scrub to strip legacy headers (Level 07)',
+            '  status / whoami / clear  Show operator telemetry or clear terminal',
           ].join('\n'),
           'system'
         ),
       ],
     };
+  }
+
+  if (cmd === 'manual' || cmd === 'codex' || cmd === 'lab') {
+    const lines = [
+      "ELI WARD'S FIELD MANUAL — GREYOS 6.4 · KNOWLEDGE & TRAINING DATABASE (Adapted from hoochanlon/fq-book):",
+      `Completed Labs: ${state.learning.completedLessonIds.length} / ${ALL_LEARNING_LESSONS.length} · Unlocked Capabilities: ${
+        state.learning.unlockedCapabilities.length > 0
+          ? state.learning.unlockedCapabilities.join(', ')
+          : 'None yet (Open Field Manual & NetLab tab to run diagnostics)'
+      }`,
+      '-----------------------------------------------------------------------------------------',
+      ...ALL_LEARNING_LESSONS.map((l) => {
+        const done = state.learning.completedLessonIds.includes(l.id)
+          ? '[MASTERED]'
+          : '[AVAILABLE]';
+        const applied = state.learning.appliedStoryLessons.includes(l.id)
+          ? ' · [FIELD APPLIED]'
+          : '';
+        return `  ${l.code.padEnd(20, ' ')} ${l.title} (${l.titleZh}) — ${done}${applied} -> Unlocks: ${l.unlocks.tools.join(', ')}`;
+      }),
+      '-----------------------------------------------------------------------------------------',
+      "Tip: Click the 'Field Manual & NetLab' tab in GreyOS or press [M] to launch interactive Network Labs.",
+    ];
+    return {
+      ...state,
+      terminalHistory: [
+        ...state.terminalHistory,
+        cmdLine,
+        makeTermLine(lines.join('\n'), 'highlight'),
+      ],
+      lastFeedbackBanner: 'Displayed Eli Ward’s Field Manual & Training Database',
+    };
+  }
+
+  const capHandled = applyCapabilityByCommandName(state, cmd);
+  if (capHandled) {
+    return syncCharactersAndFlags(capHandled);
+  }
+
+  const resolveHostByQuery = (
+    hostQuery: string,
+    hosts = state.networkHosts
+  ) => {
+    if (!hostQuery) return undefined;
+    const cleaned = hostQuery
+      .trim()
+      .toLowerCase()
+      .replace(/^.*@/, '');
+    return hosts.find(
+      (h) =>
+        h.ip.toLowerCase() === cleaned ||
+        h.hostname.toLowerCase() === cleaned ||
+        h.hostname.toLowerCase().startsWith(cleaned + '.')
+    );
+  };
+
+  if (cmd === 'netmap' || cmd === 'hosts' || cmd === 'ifconfig') {
+    const updatedHosts = state.networkHosts.map((h) => {
+      if (
+        h.ip === '10.88.4.22' &&
+        state.evidence.some((e) => e.discovered)
+      ) {
+        return { ...h, discovered: true };
+      }
+      return h;
+    });
+
+    const visibleHosts = updatedHosts.filter((h) => h.discovered);
+    const lines = [
+      'GREYHAVEN VIRTUAL NETWORK TOPOLOGY (GreyOS netmap v0.3):',
+      `Active Interface : eth0 (10.0.2.15/24) · Proxy Tunnel: ${
+        state.flags.relay_tunnel_active
+          ? 'ACTIVE (via 172.16.40.12 MOTH_RELAY_0)'
+          : 'DIRECT (Unmasked Home Fiber)'
+      }`,
+      '-----------------------------------------------------------------------------------------',
+      'IP ADDRESS      HOSTNAME                   PRIVILEGE   STATUS         TACTICAL OP',
+      ...visibleHosts.map((h) => {
+        const ipPad = h.ip.padEnd(15, ' ');
+        const hostPad = h.hostname.padEnd(26, ' ');
+        const privPad = h.privilege.padEnd(11, ' ');
+        const statusStr = h.actionCompleted
+          ? 'OP COMPLETE'
+          : h.compromised
+          ? 'COMPROMISED'
+          : h.scanned
+          ? 'SCANNED'
+          : 'DISCOVERED';
+        return `${ipPad} ${hostPad} ${privPad} ${statusStr.padEnd(14, ' ')} ${h.actionCommand}`;
+      }),
+      '-----------------------------------------------------------------------------------------',
+      "Tip: Run 'nmap <ip>' to fingerprint services, 'exploit <ip>' to escalate privilege, and 'logs <ip>' to inspect remote logs.",
+    ];
+
+    return syncCharactersAndFlags({
+      ...state,
+      networkHosts: updatedHosts,
+      terminalHistory: [
+        ...state.terminalHistory,
+        cmdLine,
+        makeTermLine(lines.join('\n'), 'highlight'),
+      ],
+      lastFeedbackBanner: `Network Topology Mapped (${visibleHosts.length} active nodes)`,
+    });
+  }
+
+  if (cmd === 'nmap') {
+    if (!arg) {
+      const msg =
+        'nmap: missing target IP or hostname. Usage: nmap <target_ip> (e.g., nmap 172.16.40.12)';
+      return {
+        ...state,
+        terminalHistory: [
+          ...state.terminalHistory,
+          cmdLine,
+          makeTermLine(msg, 'error'),
+        ],
+        lastFeedbackBanner: msg,
+      };
+    }
+
+    const targetHost = resolveHostByQuery(arg.split(/\s+/)[0]);
+    if (!targetHost) {
+      const msg = `nmap: Failed to resolve "${arg}": Host unreachable or outside captured routes.`;
+      return {
+        ...state,
+        terminalHistory: [
+          ...state.terminalHistory,
+          cmdLine,
+          makeTermLine(msg, 'error'),
+        ],
+        lastFeedbackBanner: msg,
+      };
+    }
+
+    const updatedHosts = state.networkHosts.map((h) =>
+      h.ip === targetHost.ip ? { ...h, discovered: true, scanned: true } : h
+    );
+
+    const svcLines = targetHost.services.map((s) => {
+      const portProto = `${s.port}/${s.protocol}`.padEnd(10, ' ');
+      const st = s.state.toUpperCase().padEnd(10, ' ');
+      const svc = s.service.padEnd(22, ' ');
+      const vuln = s.vulnerabilityNote ? `\n    └─ [VECTOR] ${s.vulnerabilityNote}` : '';
+      return `  ${portProto} ${st} ${svc} ${s.version}${vuln}`;
+    });
+
+    const scanOutput = [
+      `Starting GreyOS Nmap 7.95 service scan against ${targetHost.hostname} (${targetHost.ip})...`,
+      `Subnet: ${targetHost.subnet} · Current Access: ${targetHost.privilege}`,
+      '  PORT       STATE      SERVICE                VERSION',
+      ...svcLines,
+      `[AUTH / EXPLOIT HINT] ${targetHost.requiredCredentialHint}`,
+    ].join('\n');
+
+    return syncCharactersAndFlags({
+      ...state,
+      selectedNetworkHostIp: targetHost.ip,
+      networkHosts: updatedHosts,
+      terminalHistory: [
+        ...state.terminalHistory,
+        cmdLine,
+        makeTermLine(scanOutput, 'highlight'),
+      ],
+      monologueBanner: `Scanned ${targetHost.hostname} (${targetHost.ip}): ${targetHost.services.length} active services fingerprinted.`,
+      lastFeedbackBanner: `Nmap Scan Complete: ${targetHost.ip} (${targetHost.hostname})`,
+    });
+  }
+
+  if (cmd === 'exploit' || cmd === 'ssh') {
+    if (!arg) {
+      const msg = `${cmd}: missing target host. Usage: ${cmd} <target_ip> (e.g., ${cmd} 172.16.40.12)`;
+      return {
+        ...state,
+        terminalHistory: [
+          ...state.terminalHistory,
+          cmdLine,
+          makeTermLine(msg, 'error'),
+        ],
+        lastFeedbackBanner: msg,
+      };
+    }
+
+    const targetHost = resolveHostByQuery(arg.split(/\s+/)[0]);
+    if (!targetHost) {
+      const msg = `${cmd}: connect to host ${arg}: Network unreachable.`;
+      return {
+        ...state,
+        terminalHistory: [
+          ...state.terminalHistory,
+          cmdLine,
+          makeTermLine(msg, 'error'),
+        ],
+        lastFeedbackBanner: msg,
+      };
+    }
+
+    if (targetHost.ip === '10.0.2.15') {
+      return {
+        ...state,
+        selectedNetworkHostIp: targetHost.ip,
+        terminalHistory: [
+          ...state.terminalHistory,
+          cmdLine,
+          makeTermLine(
+            'Local operator session (eli@apt4b-workstation.local) is already active.',
+            'system'
+          ),
+        ],
+      };
+    }
+
+    if (targetHost.ip === '10.88.14.9') {
+      const msg =
+        'ssh/exploit 10.88.14.9: Connection refused by Executive Enclave Hardware HSM. Warning: Running raw `probe 10.88.14.9` will trip Marcus Hale’s SOC honey-trap.';
+      return {
+        ...state,
+        selectedNetworkHostIp: targetHost.ip,
+        terminalHistory: [
+          ...state.terminalHistory,
+          cmdLine,
+          makeTermLine(msg, 'error'),
+        ],
+        lastFeedbackBanner: msg,
+      };
+    }
+
+    // Host 172.16.40.12: Port District SIP Relay
+    if (targetHost.ip === '172.16.40.12') {
+      const hasSmsTrace =
+        state.flags.first_choice === 'TRACE_SMS' ||
+        targetHost.scanned ||
+        arg.toUpperCase().includes('MOTH_RELAY_0');
+
+      if (!hasSmsTrace) {
+        const denyMsg =
+          'Permission denied (sip-token): Missing relay token. Run `nmap 172.16.40.12` first to fingerprint the Asterisk SIP header token (MOTH_RELAY_0).';
+        return {
+          ...state,
+          selectedNetworkHostIp: targetHost.ip,
+          terminalHistory: [
+            ...state.terminalHistory,
+            cmdLine,
+            makeTermLine(denyMsg, 'error'),
+          ],
+          lastFeedbackBanner: denyMsg,
+        };
+      }
+
+      const updatedHosts = state.networkHosts.map((h) =>
+        h.ip === '172.16.40.12'
+          ? {
+              ...h,
+              discovered: true,
+              scanned: true,
+              privilege: 'OPERATOR' as const,
+              compromised: true,
+            }
+          : h
+      );
+
+      const successMsg =
+        '[EXPLOIT SUCCESS — 172.16.40.12] Replayed disposable SIP token MOTH_RELAY_0 -> Privilege escalated to OPERATOR on moth-sip-relay.port.\n  Next: Run `logs 172.16.40.12` to inspect intercepted calls or `pivot 172.16.40.12` to route your traffic through the dark-fiber proxy (-10% Exposure).';
+      return syncCharactersAndFlags({
+        ...state,
+        selectedNetworkHostIp: targetHost.ip,
+        networkHosts: updatedHosts,
+        terminalHistory: [
+          ...state.terminalHistory,
+          cmdLine,
+          makeTermLine(successMsg, 'highlight'),
+        ],
+        monologueBanner:
+          'You gained OPERATOR access on the Port District SIP relay (172.16.40.12). You can now inspect its logs or activate an anonymizing proxy tunnel.',
+        lastFeedbackBanner:
+          'Host Compromised: 172.16.40.12 (OPERATOR Privilege)',
+      });
+    }
+
+    // Host 10.40.4.18: Municipal Optical Pole #04
+    if (targetHost.ip === '10.40.4.18') {
+      const hasBadgeOrScan =
+        state.inventory.some((i) => i.id === 'item_badge' && i.acquired) ||
+        targetHost.scanned ||
+        arg.toLowerCase().includes('e.ward_09');
+
+      if (!hasBadgeOrScan) {
+        const denyMsg =
+          'Authentication failed (nvram-key): Legacy contractor key required. Inspect your Revoked Vespera ID Badge in Apartment 4B or run `nmap 10.40.4.18` first.';
+        return {
+          ...state,
+          selectedNetworkHostIp: targetHost.ip,
+          terminalHistory: [
+            ...state.terminalHistory,
+            cmdLine,
+            makeTermLine(denyMsg, 'error'),
+          ],
+          lastFeedbackBanner: denyMsg,
+        };
+      }
+
+      const updatedHosts = state.networkHosts.map((h) =>
+        h.ip === '10.40.4.18'
+          ? {
+              ...h,
+              discovered: true,
+              scanned: true,
+              privilege: 'ADMIN' as const,
+              compromised: true,
+            }
+          : h
+      );
+
+      const successMsg =
+        '[AUTH BYPASS — 10.40.4.18] Authenticated with cached municipal support key (e.ward_09) -> Privilege escalated to ADMIN on muni-cam-sector04.gov.\n  Next: Run `logs 10.40.4.18` to view 4th Ave surveillance feeds or `scrub 10.40.4.18` to wipe your gait/IMEI signature (-10% Exposure, -5% Suspicion).';
+      return syncCharactersAndFlags({
+        ...state,
+        selectedNetworkHostIp: targetHost.ip,
+        networkHosts: updatedHosts,
+        terminalHistory: [
+          ...state.terminalHistory,
+          cmdLine,
+          makeTermLine(successMsg, 'highlight'),
+        ],
+        monologueBanner:
+          'Your revoked contractor key e.ward_09 was never purged from Municipal Camera #04’s local NVRAM! You now have ADMIN access to 10.40.4.18.',
+        lastFeedbackBanner: 'Host Compromised: 10.40.4.18 (ADMIN Privilege)',
+      });
+    }
+
+    // Host 10.88.4.22: Vespera Core Edge Gateway 02
+    if (targetHost.ip === '10.88.4.22') {
+      const hasShadowToken =
+        state.evidence.some((e) => e.id === 'EV-03' && e.discovered) ||
+        arg.toLowerCase().includes('svc_lantern_sync') ||
+        arg.toLowerCase().includes('0x9f4a2c');
+
+      if (!hasShadowToken) {
+        const denyMsg =
+          'Permission denied (publickey,keyring): Unrevoked shadow session token required. Inspect `/home/eli/Downloads/incident_0427/auth_shadow.dump` (`cat auth_shadow.dump`) first to extract token `svc_lantern_sync`.';
+        return {
+          ...state,
+          selectedNetworkHostIp: targetHost.ip,
+          terminalHistory: [
+            ...state.terminalHistory,
+            cmdLine,
+            makeTermLine(denyMsg, 'error'),
+          ],
+          lastFeedbackBanner: denyMsg,
+        };
+      }
+
+      const updatedHosts = state.networkHosts.map((h) =>
+        h.ip === '10.88.4.22'
+          ? {
+              ...h,
+              discovered: true,
+              scanned: true,
+              privilege: 'ROOT' as const,
+              compromised: true,
+            }
+          : h
+      );
+
+      const successMsg =
+        '[ROOT SHELL — 10.88.4.22] Injected shadow token svc_lantern_sync (0x9F4A2C) -> Escalated to ROOT (uid=0) on vespera-edge-gw02.corp.\n  Next: Run `logs 10.88.4.22` or `dump 10.88.4.22` to extract the hardware keyring log proving who reactivated e.ward_09.';
+      return syncCharactersAndFlags({
+        ...state,
+        selectedNetworkHostIp: targetHost.ip,
+        networkHosts: updatedHosts,
+        terminalHistory: [
+          ...state.terminalHistory,
+          cmdLine,
+          makeTermLine(successMsg, 'highlight'),
+        ],
+        monologueBanner:
+          'Shadow token svc_lantern_sync granted you a live ROOT session on Vespera Edge Gateway 02 (10.88.4.22).',
+        lastFeedbackBanner: 'Host Compromised: 10.88.4.22 (ROOT Privilege)',
+      });
+    }
+  }
+
+  if (cmd === 'logs') {
+    const targetHost = resolveHostByQuery(arg.split(/\s+/)[0] || '10.0.2.15');
+    if (!targetHost) {
+      const msg = `logs: cannot open remote syslog on '${arg}': Host not found.`;
+      return {
+        ...state,
+        terminalHistory: [
+          ...state.terminalHistory,
+          cmdLine,
+          makeTermLine(msg, 'error'),
+        ],
+        lastFeedbackBanner: msg,
+      };
+    }
+
+    if (!targetHost.compromised && !state.debugMode) {
+      const denyMsg = `Permission denied: Host ${targetHost.ip} (${targetHost.hostname}) is locked [Privilege: ${targetHost.privilege}]. Run 'nmap ${targetHost.ip}' and 'exploit ${targetHost.ip}' first.`;
+      return {
+        ...state,
+        selectedNetworkHostIp: targetHost.ip,
+        terminalHistory: [
+          ...state.terminalHistory,
+          cmdLine,
+          makeTermLine(denyMsg, 'error'),
+        ],
+        lastFeedbackBanner: denyMsg,
+      };
+    }
+
+    const logLines = targetHost.logs.map(
+      (l) => `[${l.timestamp}] (${l.source}) ${l.entry}\n  └─ ${l.entryZh}`
+    );
+
+    const logEventKey = `event:host_logs:${targetHost.ip}`;
+    const isFirstRead = !state.completedEvents.includes(logEventKey);
+    let nextTrust = state.flags.trust_nadia;
+    let nextCounterProof = state.flags.counter_proof_secured;
+    let extraNote = '';
+
+    if (targetHost.ip === '172.16.40.12' && isFirstRead) {
+      nextTrust = clampMetric(nextTrust + 5);
+      extraNote =
+        '\n[INTEL VERIFIED] SIP trunk logs confirm Vespera SOC tapped Nadia’s phone 67 seconds before your anonymous warning arrived (+5% Nadia Trust).';
+    } else if (targetHost.ip === '10.88.4.22' && isFirstRead) {
+      nextCounterProof = true;
+      extraNote =
+        '\n[COUNTER-PROOF DISCOVERED] Kernel keyring log proves Director Marcus Hale’s hardware key [M_HALE_SEC_01] forged your e.ward_09 signature!';
+    }
+
+    return syncCharactersAndFlags({
+      ...state,
+      selectedNetworkHostIp: targetHost.ip,
+      completedEvents: isFirstRead
+        ? [...state.completedEvents, logEventKey]
+        : state.completedEvents,
+      flags: {
+        ...state.flags,
+        trust_nadia: nextTrust,
+        counter_proof_secured: nextCounterProof,
+      },
+      terminalHistory: [
+        ...state.terminalHistory,
+        cmdLine,
+        makeTermLine(
+          `=== REMOTE SYSLOG DUMP: ${targetHost.hostname} (${targetHost.ip}) ===\n` +
+            logLines.join('\n') +
+            extraNote,
+          'highlight'
+        ),
+      ],
+      lastFeedbackBanner: `Inspected Remote Logs: ${targetHost.hostname}`,
+    });
+  }
+
+  if (cmd === 'pivot') {
+    const targetHost = resolveHostByQuery(arg.split(/\s+/)[0] || '172.16.40.12');
+    if (!targetHost || targetHost.ip !== '172.16.40.12') {
+      const msg =
+        'pivot: Only Port District SIP Relay (172.16.40.12) supports dark-fiber proxy tunneling. Usage: pivot 172.16.40.12';
+      return {
+        ...state,
+        terminalHistory: [
+          ...state.terminalHistory,
+          cmdLine,
+          makeTermLine(msg, 'error'),
+        ],
+        lastFeedbackBanner: msg,
+      };
+    }
+
+    if (!targetHost.compromised && !state.debugMode) {
+      const denyMsg =
+        'Permission denied: You must gain OPERATOR privilege on 172.16.40.12 first (`nmap 172.16.40.12` then `exploit 172.16.40.12`).';
+      return {
+        ...state,
+        selectedNetworkHostIp: '172.16.40.12',
+        terminalHistory: [
+          ...state.terminalHistory,
+          cmdLine,
+          makeTermLine(denyMsg, 'error'),
+        ],
+        lastFeedbackBanner: denyMsg,
+      };
+    }
+
+    const eventKey = 'event:pivot_172.16.40.12';
+    const isFirst = !state.completedEvents.includes(eventKey);
+    const nextExposure = isFirst
+      ? clampMetric(state.flags.player_exposure - 10)
+      : state.flags.player_exposure;
+
+    const updatedHosts = state.networkHosts.map((h) =>
+      h.ip === '172.16.40.12' ? { ...h, actionCompleted: true } : h
+    );
+
+    return syncCharactersAndFlags({
+      ...state,
+      selectedNetworkHostIp: '172.16.40.12',
+      networkHosts: updatedHosts,
+      completedEvents: isFirst
+        ? [...state.completedEvents, eventKey]
+        : state.completedEvents,
+      flags: {
+        ...state.flags,
+        relay_tunnel_active: true,
+        player_exposure: nextExposure,
+      },
+      terminalHistory: [
+        ...state.terminalHistory,
+        cmdLine,
+        makeTermLine(
+          isFirst
+            ? '[PROXY TUNNEL ESTABLISHED] Routing Apt 4B traffic through Port District relay 172.16.40.12 (MOTH_RELAY_0) -> Player Exposure reduced by -10%.'
+            : '[PROXY TUNNEL] Dark-fiber relay tunnel through 172.16.40.12 is already active.',
+          'highlight'
+        ),
+      ],
+      monologueBanner:
+        'Your outbound traffic is now masked through the Port District SIP relay (172.16.40.12), cutting your cellular/network exposure by 10%.',
+      lastFeedbackBanner: isFirst
+        ? 'Proxy Tunnel Active: -10% Player Exposure'
+        : 'Proxy Tunnel Already Active',
+    });
+  }
+
+  if (cmd === 'scrub') {
+    const targetHost = resolveHostByQuery(arg.split(/\s+/)[0] || '10.40.4.18');
+    if (!targetHost || targetHost.ip !== '10.40.4.18') {
+      const msg =
+        'scrub: Target must be Municipal Optical Pole #04 Controller (10.40.4.18). Usage: scrub 10.40.4.18';
+      return {
+        ...state,
+        terminalHistory: [
+          ...state.terminalHistory,
+          cmdLine,
+          makeTermLine(msg, 'error'),
+        ],
+        lastFeedbackBanner: msg,
+      };
+    }
+
+    if (!targetHost.compromised && !state.debugMode) {
+      const denyMsg =
+        'Permission denied: ADMIN privilege required on 10.40.4.18. Run `nmap 10.40.4.18` and `exploit 10.40.4.18` first.';
+      return {
+        ...state,
+        selectedNetworkHostIp: '10.40.4.18',
+        terminalHistory: [
+          ...state.terminalHistory,
+          cmdLine,
+          makeTermLine(denyMsg, 'error'),
+        ],
+        lastFeedbackBanner: denyMsg,
+      };
+    }
+
+    const eventKey = 'event:scrub_10.40.4.18';
+    const isFirst = !state.completedEvents.includes(eventKey);
+    const nextExposure = isFirst
+      ? clampMetric(state.flags.player_exposure - 10)
+      : state.flags.player_exposure;
+    const nextSuspicion = isFirst
+      ? clampMetric(state.flags.corporate_suspicion - 5)
+      : state.flags.corporate_suspicion;
+
+    const updatedHosts = state.networkHosts.map((h) =>
+      h.ip === '10.40.4.18' ? { ...h, actionCompleted: true } : h
+    );
+
+    return syncCharactersAndFlags({
+      ...state,
+      selectedNetworkHostIp: '10.40.4.18',
+      networkHosts: updatedHosts,
+      completedEvents: isFirst
+        ? [...state.completedEvents, eventKey]
+        : state.completedEvents,
+      flags: {
+        ...state.flags,
+        camera_scrubbed: true,
+        camera_tracked: false,
+        player_exposure: nextExposure,
+        corporate_suspicion: nextSuspicion,
+      },
+      terminalHistory: [
+        ...state.terminalHistory,
+        cmdLine,
+        makeTermLine(
+          isFirst
+            ? '[NVRAM SCRUB COMPLETE] Purged watchlist #EW-09 & gait hash buffer on 10.40.4.18 (muni-cam-sector04.gov) -> Camera Lock disabled, -10% Exposure, -5% Corporate Suspicion.'
+            : '[NVRAM SCRUB] Sector 04 optical buffer is already clean.',
+          'highlight'
+        ),
+      ],
+      monologueBanner:
+        'You wiped your gait and IMEI hash from Municipal Optical Pole #04’s NVRAM buffer (-10% Exposure, -5% Corporate Suspicion).',
+      lastFeedbackBanner: isFirst
+        ? 'Camera Buffer Scrubbed: -10% Exposure, -5% Suspicion'
+        : 'Camera Buffer Already Scrubbed',
+    });
+  }
+
+  if (cmd === 'dump') {
+    const targetHost = resolveHostByQuery(arg.split(/\s+/)[0] || '10.88.4.22');
+    if (!targetHost || targetHost.ip !== '10.88.4.22') {
+      const msg =
+        'dump: Target must be Vespera Edge Gateway 02 (10.88.4.22). Usage: dump 10.88.4.22';
+      return {
+        ...state,
+        terminalHistory: [
+          ...state.terminalHistory,
+          cmdLine,
+          makeTermLine(msg, 'error'),
+        ],
+        lastFeedbackBanner: msg,
+      };
+    }
+
+    if (!targetHost.compromised && !state.debugMode) {
+      const denyMsg =
+        'Permission denied: ROOT privilege required on 10.88.4.22. Inspect `auth_shadow.dump` (`cat auth_shadow.dump`) and run `exploit 10.88.4.22` first.';
+      return {
+        ...state,
+        selectedNetworkHostIp: '10.88.4.22',
+        terminalHistory: [
+          ...state.terminalHistory,
+          cmdLine,
+          makeTermLine(denyMsg, 'error'),
+        ],
+        lastFeedbackBanner: denyMsg,
+      };
+    }
+
+    const eventKey = 'event:dump_10.88.4.22';
+    const isFirst = !state.completedEvents.includes(eventKey);
+    const nextSuspicion = isFirst
+      ? clampMetric(state.flags.corporate_suspicion - 5)
+      : state.flags.corporate_suspicion;
+
+    const updatedHosts = state.networkHosts.map((h) =>
+      h.ip === '10.88.4.22' ? { ...h, actionCompleted: true } : h
+    );
+
+    return syncCharactersAndFlags({
+      ...state,
+      selectedNetworkHostIp: '10.88.4.22',
+      networkHosts: updatedHosts,
+      completedEvents: isFirst
+        ? [...state.completedEvents, eventKey]
+        : state.completedEvents,
+      flags: {
+        ...state.flags,
+        counter_proof_secured: true,
+        corporate_suspicion: nextSuspicion,
+      },
+      terminalHistory: [
+        ...state.terminalHistory,
+        cmdLine,
+        makeTermLine(
+          isFirst
+            ? '[KEYRING FORGERY DUMP SECURED] Extracted /var/log/kern_keyring.log from 10.88.4.22: Hardware YubiKey [M_HALE_SEC_01 — Director Marcus Hale] remotely re-activated e.ward_09 at 01:55:49 AM (-5% Corporate Suspicion).'
+            : '[KEYRING DUMP] Hardware keyring forgery proof [M_HALE_SEC_01] is already archived.',
+          'highlight'
+        ),
+      ],
+      monologueBanner:
+        'You extracted cryptographic proof from Vespera Edge Gateway 02 showing Marcus Hale’s own hardware key [M_HALE_SEC_01] re-activated your old employee ID!',
+      lastFeedbackBanner: isFirst
+        ? 'Counter-Proof Secured: Marcus Hale Keyring Forgery Logged (-5% Suspicion)'
+        : 'Counter-Proof Already Secured',
+    });
   }
 
   // High-risk active network probe command (strictly validates target IP; only 10.88.14.9 triggers the Vespera Enclave honey-trap once)

@@ -1,38 +1,66 @@
 import React, { useState } from 'react';
-import { ComputerAppId, DeadAirState } from '../game/types';
+import { ComputerAppId, DeadAirState, VirtualHost } from '../game/types';
 import {
   canAccessVirtualFile,
   hasMothArchiveKey,
 } from '../game/storyEngine';
+import { KnowledgeCategoryId } from '../learning/lessonTypes';
+import { ALL_LEARNING_LESSONS } from '../data/learningMissions';
+import { KnowledgeCodex } from '../ui/KnowledgeCodex';
 import { ForensicTimelineView } from '../components/ForensicTimelineView';
 import {
   FolderOpen,
   Terminal as TerminalIcon,
+  Network,
   Mail,
   Clock,
+  BookOpen,
   X,
   FileCode,
   Send,
   ShieldAlert,
   Lock,
   CheckCircle2,
+  Server,
+  KeyRound,
+  Activity,
+  FileText,
 } from 'lucide-react';
 
 interface VirtualDesktopModalProps {
   state: DeadAirState;
   onSelectApp: (app: ComputerAppId) => void;
+  onSelectNetworkHost: (ip: string) => void;
   onInspectFile: (filePath: string) => void;
   onExecuteCommand: (cmd: string) => void;
   onCorrelateTimeline: () => void;
+  onSelectLearningCategory: (category: KnowledgeCategoryId | 'all') => void;
+  onSelectLearningLesson: (lessonId: string) => void;
+  onOpenNetworkLab: (lessonId: string) => void;
+  onCloseNetworkLab: () => void;
+  onExecuteLabDiagnostic: (lessonId: string, diagnosticId: string) => void;
+  onSubmitLabResolution: (lessonId: string, resolutionId: string) => void;
+  onApplyLessonToStory: (
+    lessonId: string,
+    mode: 'analytical' | 'brute_force'
+  ) => void;
   onClose: () => void;
 }
 
 export const VirtualDesktopModal: React.FC<VirtualDesktopModalProps> = ({
   state,
   onSelectApp,
+  onSelectNetworkHost,
   onInspectFile,
   onExecuteCommand,
   onCorrelateTimeline,
+  onSelectLearningCategory,
+  onSelectLearningLesson,
+  onOpenNetworkLab,
+  onCloseNetworkLab,
+  onExecuteLabDiagnostic,
+  onSubmitLabResolution,
+  onApplyLessonToStory,
   onClose,
 }) => {
   const [cmdInput, setCmdInput] = useState('');
@@ -52,6 +80,10 @@ export const VirtualDesktopModal: React.FC<VirtualDesktopModalProps> = ({
   const activeEmail =
     state.emails.find((e) => e.id === selectedEmailId) || state.emails[0];
 
+  const activeHost: VirtualHost =
+    state.networkHosts.find((h) => h.ip === state.selectedNetworkHostIp) ||
+    state.networkHosts[0];
+
   const handleTerminalSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     if (!cmdInput.trim()) return;
@@ -61,6 +93,8 @@ export const VirtualDesktopModal: React.FC<VirtualDesktopModalProps> = ({
 
   const quickCommands = [
     { label: 'ls', cmd: 'ls' },
+    { label: 'netmap (Network Hosts)', cmd: 'netmap' },
+    { label: 'manual (Field Manual CLI)', cmd: 'manual' },
     { label: 'cat ntp_override.conf', cmd: 'cat ntp_override.conf' },
     { label: 'cat access_0427.log', cmd: 'cat access_0427.log' },
     { label: 'cat auth_shadow.dump', cmd: 'cat auth_shadow.dump' },
@@ -94,13 +128,13 @@ export const VirtualDesktopModal: React.FC<VirtualDesktopModalProps> = ({
             </span>
           </div>
 
-          {/* 4 Desktop Application Switcher Tabs */}
-          <div className="flex items-center gap-2">
+          {/* 5 Desktop Application Switcher Tabs */}
+          <div className="flex flex-wrap items-center gap-2">
             <button
               type="button"
               data-testid="desktop-app-FILES"
               onClick={() => onSelectApp('FILES')}
-              className={`flex items-center gap-1.5 px-3 py-1.5 rounded text-xs font-mono transition cursor-pointer ${
+              className={`flex items-center gap-1.5 px-3 py-1.5 rounded text-xs font-mono transition cursor-pointer whitespace-nowrap shrink-0 ${
                 state.activeComputerApp === 'FILES'
                   ? 'bg-[#4FA3B8] text-[#080B0E] font-semibold'
                   : 'bg-[#080B0E] text-[#8E98A4] hover:text-[#E3E7EB]'
@@ -114,7 +148,7 @@ export const VirtualDesktopModal: React.FC<VirtualDesktopModalProps> = ({
               type="button"
               data-testid="desktop-app-TERMINAL"
               onClick={() => onSelectApp('TERMINAL')}
-              className={`flex items-center gap-1.5 px-3 py-1.5 rounded text-xs font-mono transition cursor-pointer ${
+              className={`flex items-center gap-1.5 px-3 py-1.5 rounded text-xs font-mono transition cursor-pointer whitespace-nowrap shrink-0 ${
                 state.activeComputerApp === 'TERMINAL'
                   ? 'bg-[#4FA3B8] text-[#080B0E] font-semibold'
                   : 'bg-[#080B0E] text-[#8E98A4] hover:text-[#E3E7EB]'
@@ -126,9 +160,25 @@ export const VirtualDesktopModal: React.FC<VirtualDesktopModalProps> = ({
 
             <button
               type="button"
+              data-testid="desktop-app-NETWORK"
+              onClick={() => onSelectApp('NETWORK')}
+              className={`flex items-center gap-1.5 px-3 py-1.5 rounded text-xs font-mono transition cursor-pointer whitespace-nowrap shrink-0 ${
+                state.activeComputerApp === 'NETWORK'
+                  ? 'bg-[#4FA3B8] text-[#080B0E] font-semibold'
+                  : 'bg-[#080B0E] text-[#8E98A4] hover:text-[#E3E7EB]'
+              }`}
+            >
+              <Network className="w-3.5 h-3.5" />
+              <span>
+                Network &amp; Host Ops ({state.flags.compromised_hosts_count}/3)
+              </span>
+            </button>
+
+            <button
+              type="button"
               data-testid="desktop-app-TIMELINE"
               onClick={() => onSelectApp('TIMELINE')}
-              className={`flex items-center gap-1.5 px-3 py-1.5 rounded text-xs font-mono transition cursor-pointer ${
+              className={`flex items-center gap-1.5 px-3 py-1.5 rounded text-xs font-mono transition cursor-pointer whitespace-nowrap shrink-0 ${
                 state.activeComputerApp === 'TIMELINE'
                   ? 'bg-[#4FA3B8] text-[#080B0E] font-semibold'
                   : 'bg-[#080B0E] text-[#8E98A4] hover:text-[#E3E7EB]'
@@ -144,7 +194,7 @@ export const VirtualDesktopModal: React.FC<VirtualDesktopModalProps> = ({
               type="button"
               data-testid="desktop-app-MAIL"
               onClick={() => onSelectApp('MAIL')}
-              className={`flex items-center gap-1.5 px-3 py-1.5 rounded text-xs font-mono transition cursor-pointer ${
+              className={`flex items-center gap-1.5 px-3 py-1.5 rounded text-xs font-mono transition cursor-pointer whitespace-nowrap shrink-0 ${
                 state.activeComputerApp === 'MAIL'
                   ? 'bg-[#4FA3B8] text-[#080B0E] font-semibold'
                   : 'bg-[#080B0E] text-[#8E98A4] hover:text-[#E3E7EB]'
@@ -156,9 +206,27 @@ export const VirtualDesktopModal: React.FC<VirtualDesktopModalProps> = ({
 
             <button
               type="button"
+              data-testid="desktop-app-MANUAL"
+              onClick={() => onSelectApp('MANUAL')}
+              className={`flex items-center gap-1.5 px-3 py-1.5 rounded text-xs font-mono transition cursor-pointer whitespace-nowrap shrink-0 ${
+                state.activeComputerApp === 'MANUAL'
+                  ? 'bg-[#4FA3B8] text-[#080B0E] font-semibold'
+                  : 'bg-[#080B0E] text-[#8E98A4] hover:text-[#E3E7EB]'
+              }`}
+            >
+              <BookOpen className="w-3.5 h-3.5" />
+              <span>
+                Field Manual &amp; NetLab (
+                {state.learning.completedLessonIds.length}/
+                {ALL_LEARNING_LESSONS.length})
+              </span>
+            </button>
+
+            <button
+              type="button"
               data-testid="close-desktop-btn"
               onClick={onClose}
-              className="ml-2 px-2.5 py-1.5 rounded border border-white/15 hover:border-[#C94B4B] text-xs font-mono text-[#8E98A4] hover:text-[#E3E7EB] flex items-center gap-1 transition cursor-pointer"
+              className="ml-1 px-2.5 py-1.5 rounded border border-white/15 hover:border-[#C94B4B] text-xs font-mono text-[#8E98A4] hover:text-[#E3E7EB] flex items-center gap-1 transition cursor-pointer whitespace-nowrap shrink-0"
             >
               <X className="w-3.5 h-3.5" />
               <span>STEP BACK FROM DESK</span>
@@ -356,7 +424,7 @@ export const VirtualDesktopModal: React.FC<VirtualDesktopModalProps> = ({
                   data-testid="terminal-input"
                   value={cmdInput}
                   onChange={(e) => setCmdInput(e.target.value)}
-                  placeholder="Type ls, cat ntp_override.conf, cat access_0427.log, verify, status, or help..."
+                  placeholder="Type netmap, nmap <ip>, exploit <ip>, logs <ip>, pivot, scrub, dump, cat <file>, verify, or help..."
                   className="flex-1 bg-transparent text-xs font-mono text-[#E3E7EB] focus:outline-none"
                 />
                 <button
@@ -371,7 +439,359 @@ export const VirtualDesktopModal: React.FC<VirtualDesktopModalProps> = ({
             </div>
           )}
 
-          {/* APP 3: VISUAL FORENSIC TIMELINE */}
+          {/* APP 3: VIRTUAL NETWORK & HOST INTRUSION OPS (V0.3) */}
+          {state.activeComputerApp === 'NETWORK' && (
+            <div className="flex-1 grid grid-cols-1 md:grid-cols-12 overflow-hidden">
+              {/* Left Column: Discovered Subnet Topology & Host Nodes */}
+              <div className="md:col-span-5 border-r border-white/10 bg-[#0C1117] p-4 overflow-y-auto space-y-2.5">
+                <div className="flex items-center justify-between mb-2">
+                  <div className="text-xs font-mono uppercase tracking-wider text-[#4FA3B8]">
+                    GREYHAVEN VIRTUAL SUBNET TOPOLOGY · 虚拟网络节点
+                  </div>
+                  <button
+                    type="button"
+                    data-testid="network-refresh-netmap-btn"
+                    onClick={() => onExecuteCommand('netmap')}
+                    className="px-2 py-1 rounded border border-[#4FA3B8]/40 bg-[#12171D] hover:bg-[#4FA3B8]/20 text-[10px] font-mono text-[#E3E7EB] cursor-pointer"
+                  >
+                    RUN NETMAP
+                  </button>
+                </div>
+
+                {/* Tactical Counter-Surveillance Status Banner */}
+                <div className="p-3 rounded border border-white/10 bg-[#080B0E] text-[11px] font-mono space-y-1 tabular-nums">
+                  <div className="flex items-center justify-between">
+                    <span className="text-[#8E98A4]">PROXY TUNNEL (172.16.40.12)</span>
+                    <span
+                      className={
+                        state.flags.relay_tunnel_active
+                          ? 'text-[#469A6C]'
+                          : 'text-[#D89B3C]'
+                      }
+                    >
+                      {state.flags.relay_tunnel_active
+                        ? 'MASKED (-10% EXP)'
+                        : 'UNMASKED FIBER'}
+                    </span>
+                  </div>
+                  <div className="flex items-center justify-between">
+                    <span className="text-[#8E98A4]">CAMERA #04 NVRAM (10.40.4.18)</span>
+                    <span
+                      className={
+                        state.flags.camera_scrubbed
+                          ? 'text-[#469A6C]'
+                          : 'text-[#D89B3C]'
+                      }
+                    >
+                      {state.flags.camera_scrubbed
+                        ? 'SCRUBBED (SAFE)'
+                        : 'WATCHLIST ACTIVE'}
+                    </span>
+                  </div>
+                  <div className="flex items-center justify-between">
+                    <span className="text-[#8E98A4]">KEYRING FORGERY (10.88.4.22)</span>
+                    <span
+                      className={
+                        state.flags.counter_proof_secured
+                          ? 'text-[#469A6C]'
+                          : 'text-[#8E98A4]'
+                      }
+                    >
+                      {state.flags.counter_proof_secured
+                        ? 'M_HALE_SEC_01 LOGGED'
+                        : 'UNDISCOVERED'}
+                    </span>
+                  </div>
+                </div>
+
+                {state.networkHosts.map((host) => {
+                  const isSelected = activeHost.ip === host.ip;
+                  const isEnclave = host.ip === '10.88.14.9';
+
+                  return (
+                    <button
+                      key={host.ip}
+                      type="button"
+                      data-testid={`network-host-${host.ip}`}
+                      onClick={() => onSelectNetworkHost(host.ip)}
+                      className={`w-full text-left p-3 rounded border transition cursor-pointer ${
+                        isSelected
+                          ? 'border-[#4FA3B8] bg-[#4FA3B8]/15 text-[#E3E7EB]'
+                          : isEnclave
+                          ? 'border-[#C94B4B]/40 bg-[#C94B4B]/5 hover:border-[#C94B4B] text-[#E3E7EB]'
+                          : 'border-white/10 bg-[#12171D] hover:border-[#4FA3B8]/50 text-[#C2CAD3]'
+                      }`}
+                    >
+                      <div className="flex items-start justify-between gap-2">
+                        <div className="flex items-start gap-2.5 min-w-0">
+                          <Server
+                            className={`w-4 h-4 mt-0.5 shrink-0 ${
+                              isEnclave
+                                ? 'text-[#C94B4B]'
+                                : host.compromised
+                                ? 'text-[#469A6C]'
+                                : 'text-[#4FA3B8]'
+                            }`}
+                          />
+                          <div className="min-w-0">
+                            <div className="text-xs font-mono font-semibold truncate">
+                              {host.ip} · {host.hostname}
+                            </div>
+                            <div className="text-[11px] text-[#8E98A4] truncate">
+                              {host.role} / {host.roleZh}
+                            </div>
+                          </div>
+                        </div>
+                        <div className="text-right font-mono text-[10px] shrink-0 tabular-nums">
+                          <div
+                            className={
+                              host.compromised
+                                ? 'text-[#469A6C]'
+                                : isEnclave
+                                ? 'text-[#C94B4B]'
+                                : 'text-[#D89B3C]'
+                            }
+                          >
+                            {host.privilege}
+                          </div>
+                          <div className="text-[#8E98A4]">
+                            {host.actionCompleted
+                              ? 'OP DONE'
+                              : host.scanned
+                              ? 'SCANNED'
+                              : 'UNSCANNED'}
+                          </div>
+                        </div>
+                      </div>
+                    </button>
+                  );
+                })}
+              </div>
+
+              {/* Right Column: Selected Host Services, Intrusion Tools & Remote Logs */}
+              <div className="md:col-span-7 p-5 overflow-y-auto bg-[#080B0E] space-y-5">
+                {/* Host Header */}
+                <div className="border-b border-white/10 pb-3 flex flex-wrap items-start justify-between gap-3">
+                  <div>
+                    <div className="text-xs font-mono text-[#4FA3B8]">
+                      TARGET NODE: {activeHost.ip} ({activeHost.hostname})
+                    </div>
+                    <h3 className="text-base font-semibold text-[#E3E7EB] mt-0.5">
+                      {activeHost.role}{' '}
+                      <span className="text-xs font-normal text-[#8E98A4]">
+                        / {activeHost.roleZh}
+                      </span>
+                    </h3>
+                    <div className="text-[11px] font-mono text-[#8E98A4] mt-0.5">
+                      SUBNET: {activeHost.subnet} · PRIVILEGE:{' '}
+                      <span
+                        className={
+                          activeHost.compromised
+                            ? 'text-[#469A6C]'
+                            : 'text-[#D89B3C]'
+                        }
+                      >
+                        {activeHost.privilege}
+                      </span>
+                    </div>
+                  </div>
+                </div>
+
+                {/* Tactical Intrusion Action Buttons */}
+                <div className="space-y-2">
+                  <div className="text-xs font-mono uppercase tracking-wider text-[#8E98A4] flex items-center gap-1.5">
+                    <KeyRound className="w-3.5 h-3.5 text-[#4FA3B8]" />
+                    <span>HOST INTRUSION &amp; COUNTER-SURVEILLANCE TOOLS:</span>
+                  </div>
+                  <div className="flex flex-wrap items-center gap-2">
+                    <button
+                      type="button"
+                      data-testid={`host-scan-btn-${activeHost.ip}`}
+                      onClick={() => onExecuteCommand(`nmap ${activeHost.ip}`)}
+                      className="px-3 py-1.5 rounded border border-[#4FA3B8]/50 bg-[#12171D] hover:bg-[#4FA3B8]/20 text-xs font-mono text-[#E3E7EB] cursor-pointer transition"
+                    >
+                      1. Scan Ports (nmap {activeHost.ip})
+                    </button>
+
+                    {activeHost.ip !== '10.0.2.15' &&
+                      activeHost.ip !== '10.88.14.9' && (
+                        <button
+                          type="button"
+                          data-testid={`host-exploit-btn-${activeHost.ip}`}
+                          onClick={() =>
+                            onExecuteCommand(`exploit ${activeHost.ip}`)
+                          }
+                          className="px-3 py-1.5 rounded border border-[#D89B3C]/60 bg-[#12171D] hover:bg-[#D89B3C]/20 text-xs font-mono text-[#E3E7EB] cursor-pointer transition"
+                        >
+                          2. Escalate Privilege (exploit {activeHost.ip})
+                        </button>
+                      )}
+
+                    <button
+                      type="button"
+                      data-testid={`host-logs-btn-${activeHost.ip}`}
+                      onClick={() => onExecuteCommand(`logs ${activeHost.ip}`)}
+                      className="px-3 py-1.5 rounded border border-white/15 bg-[#12171D] hover:border-[#4FA3B8] text-xs font-mono text-[#E3E7EB] cursor-pointer transition"
+                    >
+                      3. Read Syslog (logs {activeHost.ip})
+                    </button>
+
+                    <button
+                      type="button"
+                      data-testid={`host-action-btn-${activeHost.ip}`}
+                      onClick={() => onExecuteCommand(activeHost.actionCommand)}
+                      className={`px-3.5 py-1.5 rounded font-mono font-semibold text-xs cursor-pointer transition ${
+                        activeHost.ip === '10.88.14.9'
+                          ? 'bg-[#C94B4B] hover:bg-[#d85c5c] text-[#E3E7EB]'
+                          : activeHost.actionCompleted
+                          ? 'border border-[#469A6C] bg-[#469A6C]/20 text-[#469A6C]'
+                          : 'bg-[#4FA3B8] hover:bg-[#5eb3c8] text-[#080B0E]'
+                      }`}
+                    >
+                      {activeHost.actionCompleted
+                        ? `✓ ${activeHost.actionLabel}`
+                        : `4. ${activeHost.actionLabel}`}
+                    </button>
+                  </div>
+                </div>
+
+                {/* Live Shell Telemetry Readout for Network Actions */}
+                {state.terminalHistory.length > 0 && (
+                  <div
+                    data-testid="network-shell-readout"
+                    className="p-3 rounded border border-[#4FA3B8]/30 bg-[#05080B] text-xs font-mono space-y-1"
+                  >
+                    <div className="text-[10px] uppercase tracking-wider text-[#4FA3B8]">
+                      LATEST SHELL TELEMETRY · 终端实时回显
+                    </div>
+                    <pre
+                      className={`whitespace-pre-wrap leading-relaxed text-[11px] max-h-32 overflow-y-auto ${
+                        state.terminalHistory[state.terminalHistory.length - 1]
+                          .tone === 'error'
+                          ? 'text-[#C94B4B]'
+                          : state.terminalHistory[
+                              state.terminalHistory.length - 1
+                            ].tone === 'highlight'
+                          ? 'text-[#469A6C]'
+                          : 'text-[#C2CAD3]'
+                      }`}
+                    >
+                      {
+                        state.terminalHistory[state.terminalHistory.length - 1]
+                          .text
+                      }
+                    </pre>
+                  </div>
+                )}
+
+                {/* Auth / Exploit Vector Hint Box */}
+                <div className="p-3.5 rounded border border-white/10 bg-[#0D131A] text-xs font-mono space-y-1">
+                  <div className="text-[#4FA3B8]">
+                    AUTHENTICATION &amp; EXPLOIT VECTOR:
+                  </div>
+                  <div className="text-[#C2CAD3] leading-relaxed">
+                    {activeHost.requiredCredentialHint}
+                  </div>
+                  <div className="text-[#8E98A4] leading-relaxed">
+                    {activeHost.requiredCredentialHintZh}
+                  </div>
+                </div>
+
+                {/* Services & Ports Table */}
+                <div className="space-y-2">
+                  <div className="text-xs font-mono uppercase tracking-wider text-[#8E98A4] flex items-center gap-1.5">
+                    <Activity className="w-3.5 h-3.5 text-[#4FA3B8]" />
+                    <span>FINGERPRINTED SERVICES &amp; PORTS:</span>
+                  </div>
+                  <div className="rounded border border-white/10 bg-[#0C1117] overflow-hidden">
+                    <table className="w-full text-left font-mono text-xs tabular-nums">
+                      <thead className="bg-[#12171D] text-[#8E98A4] border-b border-white/10">
+                        <tr>
+                          <th className="py-2 px-3">PORT</th>
+                          <th className="py-2 px-3">STATE</th>
+                          <th className="py-2 px-3">SERVICE</th>
+                          <th className="py-2 px-3">BANNER / VECTOR</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-white/5">
+                        {activeHost.services.map((svc) => (
+                          <tr key={svc.port}>
+                            <td className="py-2 px-3 text-[#4FA3B8]">
+                              {svc.port}/{svc.protocol}
+                            </td>
+                            <td
+                              className={`py-2 px-3 ${
+                                svc.state === 'canary'
+                                  ? 'text-[#C94B4B]'
+                                  : svc.state === 'open'
+                                  ? 'text-[#469A6C]'
+                                  : 'text-[#D89B3C]'
+                              }`}
+                            >
+                              {svc.state.toUpperCase()}
+                            </td>
+                            <td className="py-2 px-3 text-[#E3E7EB]">
+                              {svc.service}
+                            </td>
+                            <td className="py-2 px-3 text-[#8E98A4]">
+                              <div>{svc.version}</div>
+                              {svc.vulnerabilityNote && (
+                                <div className="text-[#D89B3C] text-[11px] mt-0.5">
+                                  {svc.vulnerabilityNote}
+                                </div>
+                              )}
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+
+                {/* Remote Host Syslog Viewer */}
+                <div className="space-y-2">
+                  <div className="text-xs font-mono uppercase tracking-wider text-[#8E98A4] flex items-center gap-1.5">
+                    <FileText className="w-3.5 h-3.5 text-[#4FA3B8]" />
+                    <span>REMOTE /VAR/LOG TELEMETRY:</span>
+                  </div>
+                  {activeHost.compromised ? (
+                    <div
+                      data-testid={`host-logs-panel-${activeHost.ip}`}
+                      className="p-3.5 rounded border border-[#469A6C]/40 bg-[#0D131A] font-mono text-xs space-y-2.5"
+                    >
+                      {activeHost.logs.map((log) => (
+                        <div
+                          key={log.id}
+                          className="border-b border-white/5 pb-2 last:border-0 last:pb-0"
+                        >
+                          <div className="text-[#4FA3B8] tabular-nums">
+                            [{log.timestamp}] ({log.source})
+                          </div>
+                          <div className="text-[#E3E7EB] mt-0.5">
+                            {log.entry}
+                          </div>
+                          <div className="text-[#8E98A4] text-[11px] mt-0.5">
+                            {log.entryZh}
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  ) : (
+                    <div className="p-4 rounded border border-white/10 bg-[#0C1117] font-mono text-xs text-[#8E98A4] flex items-center gap-2">
+                      <Lock className="w-4 h-4 text-[#D89B3C] shrink-0" />
+                      <span>
+                        Remote `/var/log` stream locked (Current Privilege:{' '}
+                        {activeHost.privilege}). Scan and escalate privilege to
+                        inspect host telemetry.
+                      </span>
+                    </div>
+                  )}
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* APP 4: VISUAL FORENSIC TIMELINE */}
           {state.activeComputerApp === 'TIMELINE' && (
             <div className="flex-1 p-6 overflow-y-auto bg-[#080B0E]">
               <ForensicTimelineView
@@ -382,7 +802,7 @@ export const VirtualDesktopModal: React.FC<VirtualDesktopModalProps> = ({
             </div>
           )}
 
-          {/* APP 4: LOCAL MAIL CLIENT */}
+          {/* APP 5: LOCAL MAIL CLIENT */}
           {state.activeComputerApp === 'MAIL' && (
             <div className="flex-1 grid grid-cols-1 md:grid-cols-12 overflow-hidden">
               <div className="md:col-span-5 border-r border-white/10 bg-[#0C1117] p-4 overflow-y-auto space-y-2">
@@ -428,13 +848,32 @@ export const VirtualDesktopModal: React.FC<VirtualDesktopModalProps> = ({
               </div>
             </div>
           )}
+
+          {/* APP 6: ELI WARD'S FIELD MANUAL & NETLAB (fq-book Curriculum) */}
+          {state.activeComputerApp === 'MANUAL' && (
+            <div className="flex-1 overflow-hidden">
+              <KnowledgeCodex
+                state={state}
+                onSelectCategory={onSelectLearningCategory}
+                onSelectLesson={onSelectLearningLesson}
+                onOpenLab={onOpenNetworkLab}
+                onCloseLab={onCloseNetworkLab}
+                onExecuteDiagnostic={onExecuteLabDiagnostic}
+                onSubmitResolution={onSubmitLabResolution}
+                onApplyToStory={onApplyLessonToStory}
+              />
+            </div>
+          )}
         </div>
 
         {/* Bottom Status Bar */}
         <div className="px-5 py-2.5 bg-[#12171D] border-t border-white/10 flex flex-wrap items-center justify-between text-xs font-mono text-[#8E98A4] tabular-nums">
           <div className="flex items-center gap-4">
             <span>WORKING DIR: {state.currentDir}</span>
-            <span>EVIDENCE LOGGED: {state.flags.evidence_count}/6</span>
+            <span>EVIDENCE: {state.flags.evidence_count}/6</span>
+            <span>
+              HOSTS: {state.flags.compromised_hosts_count}/3
+            </span>
             <span>
               ARCHIVE KEY:{' '}
               {hasMothArchiveKey(state) ? 'MOUNTED' : 'MISSING'}

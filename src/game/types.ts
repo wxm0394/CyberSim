@@ -1,3 +1,5 @@
+import { LearningProgressState } from '../learning/lessonTypes';
+
 export type GameShellState = 'title' | 'playing' | 'paused' | 'gameover';
 
 export type SceneId =
@@ -11,9 +13,60 @@ export type ActiveOverlay =
   | 'COMPUTER'
   | 'PHONE'
   | 'JOURNAL'
-  | 'DIALOGUE';
+  | 'DIALOGUE'
+  | 'FIELD_MANUAL';
 
-export type ComputerAppId = 'FILES' | 'TERMINAL' | 'MAIL' | 'TIMELINE';
+export type ComputerAppId =
+  | 'FILES'
+  | 'TERMINAL'
+  | 'NETWORK'
+  | 'MAIL'
+  | 'TIMELINE'
+  | 'MANUAL';
+
+export type HostPrivilegeLevel =
+  | 'LOCKED'
+  | 'GUEST'
+  | 'USER'
+  | 'OPERATOR'
+  | 'ADMIN'
+  | 'ROOT';
+
+export interface NetworkService {
+  port: number;
+  protocol: 'tcp' | 'udp';
+  service: string;
+  version: string;
+  state: 'open' | 'filtered' | 'canary';
+  vulnerabilityNote?: string;
+}
+
+export interface VirtualHost {
+  ip: string;
+  hostname: string;
+  role: string;
+  roleZh: string;
+  subnet: string;
+  discovered: boolean;
+  scanned: boolean;
+  privilege: HostPrivilegeLevel;
+  targetPrivilege: HostPrivilegeLevel;
+  requiredCredentialHint: string;
+  requiredCredentialHintZh: string;
+  compromised: boolean;
+  actionCompleted: boolean;
+  actionCommand: string;
+  actionLabel: string;
+  actionLabelZh: string;
+  services: NetworkService[];
+  logs: {
+    id: string;
+    timestamp: string;
+    source: string;
+    entry: string;
+    entryZh: string;
+  }[];
+}
 
 export type FirstPhoneChoice =
   | 'CALL_NADIA'
@@ -65,6 +118,10 @@ export interface NarrativeFlags {
   soc_warning_triggered: boolean;
   camera_tracking_risk: boolean;
   camera_tracked: boolean;
+  relay_tunnel_active: boolean;
+  camera_scrubbed: boolean;
+  counter_proof_secured: boolean;
+  compromised_hosts_count: number;
   current_objective: string;
 }
 
@@ -190,6 +247,7 @@ export interface DeadAirState {
   unlockedScenes: SceneId[];
   activeOverlay: ActiveOverlay;
   activeComputerApp: ComputerAppId;
+  selectedNetworkHostIp: string;
   activeDialogueCharacterId: string | null;
   selectedHotspotId: string | null;
   clockTime: string;
@@ -205,10 +263,12 @@ export interface DeadAirState {
   hotspots: Record<SceneId, SceneHotspot[]>;
   evidence: EvidenceArtifact[];
   files: VirtualFileEntry[];
+  networkHosts: VirtualHost[];
   emails: MailMessage[];
   phoneMessages: PhoneMessage[];
   characters: CharacterProfile[];
   inventory: InventoryItem[];
   currentDir: string;
   terminalHistory: TerminalOutputLine[];
+  learning: LearningProgressState;
 }

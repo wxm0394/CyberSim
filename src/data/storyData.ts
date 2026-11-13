@@ -11,7 +11,9 @@ import {
   SceneHotspot,
   SceneId,
   VirtualFileEntry,
+  VirtualHost,
 } from '../game/types';
+import { createInitialLearningState } from '../learning/learningProgress';
 
 export const CURRENT_SAVE_VERSION = 2;
 
@@ -923,6 +925,311 @@ export const INITIAL_INVENTORY: InventoryItem[] = [
   },
 ];
 
+export const INITIAL_NETWORK_HOSTS: VirtualHost[] = [
+  {
+    ip: '10.0.2.15',
+    hostname: 'apt4b-workstation.local',
+    role: 'Eli Ward’s GreyOS 6.4 Forensics Box',
+    roleZh: 'Eli 的本地 GreyOS 6.4 取证工作站',
+    subnet: '10.0.2.0/24 (Apt 4B Local Bridge)',
+    discovered: true,
+    scanned: true,
+    privilege: 'USER',
+    targetPrivilege: 'ROOT',
+    requiredCredentialHint:
+      'Local operator shell active. Mount /home/eli/archive_vault with moth_archive.key in APARTMENT_RETURN.',
+    requiredCredentialHintZh:
+      '本地操作员权限已激活。在深夜归来场景（APARTMENT_RETURN）使用 moth_archive.key 可挂载加密归档卷。',
+    compromised: true,
+    actionCompleted: false,
+    actionCommand: 'verify',
+    actionLabel: 'Verify Forensic Timeline (verify)',
+    actionLabelZh: '串联取证时间线 (verify)',
+    services: [
+      {
+        port: 22,
+        protocol: 'tcp',
+        service: 'sshd',
+        version: 'OpenSSH 9.6p1 GreyOS-hardened',
+        state: 'open',
+      },
+      {
+        port: 514,
+        protocol: 'udp',
+        service: 'rsyslogd',
+        version: 'rsyslog 8.2402 (Local Forensics Sink)',
+        state: 'open',
+      },
+      {
+        port: 9050,
+        protocol: 'tcp',
+        service: 'tor-socks',
+        version: 'Onion Dead-Drop Proxy (Rhea Solis Channel)',
+        state: 'open',
+      },
+    ],
+    logs: [
+      {
+        id: 'log-local-1',
+        timestamp: '02:07:12 AM',
+        source: 'scp-ingest',
+        entry:
+          'Received encrypted archive incident_0427.zip (38.9 KB) from n.park_04@10.88.4.22 prior to remote carrier drop.',
+        entryZh:
+          '在远端载波中断前，从 n.park_04@10.88.4.22 接收到加密归档包 incident_0427.zip（38.9 KB）。',
+      },
+      {
+        id: 'log-local-2',
+        timestamp: '02:16:44 AM',
+        source: 'netfilter-airgap',
+        entry:
+          'Outbound SYN filter warning: Direct unmasked traffic to 10.88.14.9 will expose apartment fiber endpoint.',
+        entryZh:
+          '防火墙警告：未经中继伪装直接向 10.88.14.9 发送探测包将暴露公寓光纤端点。',
+      },
+    ],
+  },
+  {
+    ip: '172.16.40.12',
+    hostname: 'moth-sip-relay.port',
+    role: 'Port District Disposable SIP & SMS Relay',
+    roleZh: '港区一次性 SIP 匿名短信中继节点',
+    subnet: '172.16.40.0/24 (Port District Dark Fiber)',
+    discovered: true,
+    scanned: false,
+    privilege: 'GUEST',
+    targetPrivilege: 'OPERATOR',
+    requiredCredentialHint:
+      'Trace the anonymous SMS on your smartphone (TRACE_SMS) or scan 172.16.40.12 with `nmap 172.16.40.12` to extract header token MOTH_RELAY_0, then run `exploit 172.16.40.12`.',
+    requiredCredentialHintZh:
+      '通过手机追溯匿名短信（TRACE_SMS）或运行 `nmap 172.16.40.12` 识别中继信令漏洞，再执行 `exploit 172.16.40.12` 获取中继控制权。',
+    compromised: false,
+    actionCompleted: false,
+    actionCommand: 'pivot 172.16.40.12',
+    actionLabel: 'Activate Proxy Tunnel (-10% Exposure)',
+    actionLabelZh: '激活港区代理隧道（降低 10% 暴露度）',
+    services: [
+      {
+        port: 5060,
+        protocol: 'tcp',
+        service: 'asterisk-sip',
+        version: 'Asterisk PBX 20.4 (MOTH_RELAY_0)',
+        state: 'open',
+        vulnerabilityNote:
+          'SIP header token replay allows authenticated relay pivoting.',
+      },
+      {
+        port: 8080,
+        protocol: 'tcp',
+        service: 'relay-spool',
+        version: 'Zero-Trace SMS Spooler v1.2',
+        state: 'open',
+        vulnerabilityNote:
+          'Unauthenticated spool cache readable with OPERATOR privilege.',
+      },
+    ],
+    logs: [
+      {
+        id: 'log-moth-1',
+        timestamp: '02:14:55 AM',
+        source: 'asterisk-sip',
+        entry:
+          'ALERT: Vespera SOC (10.88.14.9) attached lawful-intercept tap on subscriber Nadia Park (+1-555-0194).',
+        entryZh:
+          '告警：Vespera 安全中心（10.88.14.9）已对 Nadia Park 的手机号码挂接实时监听分流器。',
+      },
+      {
+        id: 'log-moth-2',
+        timestamp: '02:16:02 AM',
+        source: 'relay-spool',
+        entry:
+          'Dispatched anonymous warning SMS to Eli Ward: "Don\'t call her. You\'re being watched." Origin masked via MOTH_RELAY_0.',
+        entryZh:
+          '已向 Eli Ward 发送匿名警告短信：“别打给她。你正被监视。”源地址已通过 MOTH_RELAY_0 掩码。',
+      },
+    ],
+  },
+  {
+    ip: '10.40.4.18',
+    hostname: 'muni-cam-sector04.gov',
+    role: '4th Ave Municipal Optical Pole #04 Controller',
+    roleZh: '第四大道市政光学监控杆 #04 控制节点',
+    subnet: '10.40.4.0/24 (Greyhaven Civic Optical Grid)',
+    discovered: true,
+    scanned: false,
+    privilege: 'LOCKED',
+    targetPrivilege: 'ADMIN',
+    requiredCredentialHint:
+      'Inspect your Revoked Vespera ID Badge (e.ward_09) in Apartment 4B or scan 10.40.4.18 (`nmap 10.40.4.18`), then run `exploit 10.40.4.18` using legacy municipal maintenance credentials.',
+    requiredCredentialHintZh:
+      '在公寓桌面检查旧员工工牌（e.ward_09）或扫描 `nmap 10.40.4.18`，随后运行 `exploit 10.40.4.18` 利用遗留市政维护接口提权。',
+    compromised: false,
+    actionCompleted: false,
+    actionCommand: 'scrub 10.40.4.18',
+    actionLabel: 'Scrub Gait & IMEI Cache (-10% Exposure, -5% Suspicion)',
+    actionLabelZh: '清洗步态与基站缓存（降低 10% 暴露度、5% 怀疑值并解除监控锁定）',
+    services: [
+      {
+        port: 554,
+        protocol: 'tcp',
+        service: 'rtsp-stream',
+        version: 'CivicVision Dome #04 (4th Ave Crosswalk)',
+        state: 'open',
+        vulnerabilityNote:
+          'Legacy contractor support key (e.ward_09) still cached in local NVRAM.',
+      },
+      {
+        port: 8443,
+        protocol: 'tcp',
+        service: 'civic-sync',
+        version: 'Vespera LANTERN Edge Ingestor v3.1',
+        state: 'open',
+      },
+    ],
+    logs: [
+      {
+        id: 'log-cam-1',
+        timestamp: '02:36:10 AM',
+        source: 'lpr-engine',
+        entry:
+          'Vehicle match on 4th Ave: Unmarked black sedan [PLATE: VSP-094] registered to Vespera Corporate Security.',
+        entryZh:
+          '第四大道车牌识别命中：黑色无标轿车 [车牌：VSP-094]，注册于 Vespera 企业安全部。',
+      },
+      {
+        id: 'log-cam-2',
+        timestamp: '02:39:40 AM',
+        source: 'gait-tracker',
+        entry:
+          'Target Watchlist #EW-09 active on Sector 04 crosswalk. Scrubbing NVRAM buffer disables optical lock for tonight.',
+        entryZh:
+          '四号街区人行横道已加载 #EW-09 步态监控名单。清空本地 NVRAM 缓存可瘫痪今晚的光学锁定。',
+      },
+    ],
+  },
+  {
+    ip: '10.88.4.22',
+    hostname: 'vespera-edge-gw02.corp',
+    role: 'Vespera Core Telemetry & Audit Gateway 02',
+    roleZh: 'Vespera 核心遥测与审计网关 02',
+    subnet: '10.88.4.0/24 (Vespera Enterprise DMZ)',
+    discovered: false,
+    scanned: false,
+    privilege: 'LOCKED',
+    targetPrivilege: 'ROOT',
+    requiredCredentialHint:
+      'Inspect `/home/eli/Downloads/incident_0427/auth_shadow.dump` (`cat auth_shadow.dump`) to extract shadow session token `svc_lantern_sync` (0x9F4A2C), then run `exploit 10.88.4.22`.',
+    requiredCredentialHintZh:
+      '先通过 `cat auth_shadow.dump` 提取幽灵服务令牌 `svc_lantern_sync`（0x9F4A2C），再执行 `exploit 10.88.4.22` 获取网关 ROOT 权限。',
+    compromised: false,
+    actionCompleted: false,
+    actionCommand: 'dump 10.88.4.22',
+    actionLabel: 'Dump Keyring Forgery Proof (dump 10.88.4.22)',
+    actionLabelZh: '导出工号栽赃铁证日志 (dump 10.88.4.22)',
+    services: [
+      {
+        port: 22,
+        protocol: 'tcp',
+        service: 'OpenSSH_9.6p1',
+        version: 'Vespera Edge Bastion (Keyring Auth)',
+        state: 'open',
+        vulnerabilityNote:
+          'Unrevoked shadow service token svc_lantern_sync (0x9F4A2C) grants UID 0.',
+      },
+      {
+        port: 123,
+        protocol: 'udp',
+        service: 'ntpd',
+        version: 'NTP Daemon (Manual Offset -840s)',
+        state: 'open',
+      },
+      {
+        port: 9200,
+        protocol: 'tcp',
+        service: 'audit-elastic',
+        version: 'Vespera Audit Indexer (788 records wiped)',
+        state: 'filtered',
+      },
+    ],
+    logs: [
+      {
+        id: 'log-gw-1',
+        timestamp: '01:41:58 AM',
+        source: 'ntpd-override',
+        entry:
+          'Wall-clock shifted -840s by remote session originating from 10.88.14.9 (Executive Enclave).',
+        entryZh:
+          '来自高管飞地 10.88.14.9 的远端会话将网关系统时钟人为回拨了 840 秒（14 分钟）。',
+      },
+      {
+        id: 'log-gw-2',
+        timestamp: '01:55:49 AM',
+        source: 'kern-keyring',
+        entry:
+          'FORGERY PROOF: Hardware YubiKey [M_HALE_SEC_01 — Director Marcus Hale] forcefully re-enabled terminated ID e.ward_09 to sign log purge #9904.',
+        entryZh:
+          '关键反证：安全总监 Marcus Hale 的硬件密钥 [M_HALE_SEC_01] 强行重新激活了已离职工号 e.ward_09 并签署了 #9904 日志清洗指令。',
+      },
+    ],
+  },
+  {
+    ip: '10.88.14.9',
+    hostname: 'vespera-enclave-gw.corp',
+    role: 'Vespera Executive Enclave VLAN & IDS Canary',
+    roleZh: 'Vespera 高管飞地网关（主动防御蜜罐）',
+    subnet: '10.88.14.0/24 (Executive Enclave Core)',
+    discovered: false,
+    scanned: false,
+    privilege: 'LOCKED',
+    targetPrivilege: 'LOCKED',
+    requiredCredentialHint:
+      'WARNING: Protected by Director Marcus Hale’s active SOC IDS honey-trap. Running `probe 10.88.14.9` directly triggers +15% Corporate Suspicion and +15% Exposure.',
+    requiredCredentialHintZh:
+      '高危警告：受安全总监 Marcus Hale 的主动蜜罐保护。直接执行 `probe 10.88.14.9` 将触发 +15% 企业怀疑与 +15% 暴露度。',
+    compromised: false,
+    actionCompleted: false,
+    actionCommand: 'probe 10.88.14.9',
+    actionLabel: 'Active SYN Probe (HIGH RISK: +15% Suspicion/Exposure)',
+    actionLabelZh: '强制发送 SYN 探测包（高危：触发蜜罐告警）',
+    services: [
+      {
+        port: 443,
+        protocol: 'tcp',
+        service: 'vespera-enclave-gw',
+        version: 'TLS 1.3 Hardware HSM Gate',
+        state: 'open',
+      },
+      {
+        port: 8443,
+        protocol: 'tcp',
+        service: 'lantern-sync-controller',
+        version: 'Project LANTERN Master Controller',
+        state: 'filtered',
+      },
+      {
+        port: 9999,
+        protocol: 'tcp',
+        service: 'soc-canary-ids',
+        version: 'Marcus Hale Active Intrusion Honey-Trap',
+        state: 'canary',
+        vulnerabilityNote:
+          'Active IDS honey-trap: logs caller IP and dispatches containment units.',
+      },
+    ],
+    logs: [
+      {
+        id: 'log-enclave-1',
+        timestamp: '02:00:00 AM',
+        source: 'soc-canary',
+        entry:
+          'Executive Enclave HSM sealed. Any unauthenticated SYN probe to 10.88.14.9 will elevate containment priority.',
+        entryZh:
+          '高管飞地硬件加密机已闭锁。任何针对 10.88.14.9 的未授权探测都将直接拉响最高级别封锁警报。',
+      },
+    ],
+  },
+];
+
 export function createInitialDeadAirState(
   initialShellState: GameShellState = 'title'
 ): DeadAirState {
@@ -933,6 +1240,7 @@ export function createInitialDeadAirState(
     unlockedScenes: ['APARTMENT_NIGHT'],
     activeOverlay: 'NONE',
     activeComputerApp: 'FILES',
+    selectedNetworkHostIp: '10.0.2.15',
     activeDialogueCharacterId: 'nadia',
     selectedHotspotId: null,
     clockTime: '02:17 AM',
@@ -964,12 +1272,17 @@ export function createInitialDeadAirState(
       soc_warning_triggered: false,
       camera_tracking_risk: false,
       camera_tracked: false,
+      relay_tunnel_active: false,
+      camera_scrubbed: false,
+      counter_proof_secured: false,
+      compromised_hosts_count: 0,
       current_objective:
         'Step 1: Open your vibrating smartphone [P] and make your first response choice.',
     },
     hotspots: JSON.parse(JSON.stringify(INITIAL_HOTSPOTS)),
     evidence: JSON.parse(JSON.stringify(INITIAL_EVIDENCE)),
     files: JSON.parse(JSON.stringify(INITIAL_FILES)),
+    networkHosts: JSON.parse(JSON.stringify(INITIAL_NETWORK_HOSTS)),
     emails: JSON.parse(JSON.stringify(INITIAL_EMAILS)),
     phoneMessages: JSON.parse(JSON.stringify(INITIAL_PHONE_MESSAGES)),
     characters: JSON.parse(JSON.stringify(INITIAL_CHARACTERS)),
@@ -978,7 +1291,7 @@ export function createInitialDeadAirState(
     terminalHistory: [
       {
         id: 'init-1',
-        text: 'GreyOS 6.4 LTS (tty1) — Host: apt4b-workstation // User: eli (legacy ID: e.ward_09)',
+        text: 'GreyOS 6.4 LTS (tty1) — Host: apt4b-workstation · User: eli (legacy ID: e.ward_09)',
         tone: 'system',
       },
       {
@@ -988,9 +1301,10 @@ export function createInitialDeadAirState(
       },
       {
         id: 'init-3',
-        text: "Type 'help' or click any Quick Shell command above to inspect logs and correlate the forensic timeline.",
+        text: "Type 'help' or click any Quick Shell command above to inspect logs, map remote hosts ('netmap'), and correlate the forensic timeline.",
         tone: 'output',
       },
     ],
+    learning: createInitialLearningState(),
   };
 }

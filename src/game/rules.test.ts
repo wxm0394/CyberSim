@@ -21,6 +21,14 @@ import {
   transitionToScene,
 } from './storyEngine';
 import { clearDeadAirSave, migrateDeadAirSave } from '../persistence/storage';
+import {
+  applyLessonCapabilityToStory,
+  executeLabDiagnosticStep,
+  openNetworkLabForLesson,
+  submitLabResolution,
+} from '../learning/learningEngine';
+import { CURATED_SOURCE_REGISTRY, FQ_BOOK_ATTRIBUTION_HEADER } from '../learning/sourceRegistry';
+import { ALL_LEARNING_LESSONS } from '../data/learningMissions';
 
 describe('DEAD AIR V0.2.2 — Narrative Integrity, Workstation Access & Probe Integrity', () => {
   it('1. initializes game state with saveVersion 2, APARTMENT_NIGHT at 02:17 AM, and 0 discovered evidence', () => {
@@ -706,4 +714,271 @@ describe('DEAD AIR V0.2.2 — Narrative Integrity, Workstation Access & Probe In
     assert.equal(state.flags.corporate_suspicion, initialSuspicion + 15);
     assert.equal(state.flags.player_exposure, initialExposure + 15);
   });
+
+  it('20. enforces V0.3 multi-host discovery, nmap port scanning, and credential-gated exploit/ssh intrusion across virtual hosts', () => {
+    let state = createInitialDeadAirState('playing');
+    assert.equal(state.networkHosts.length, 5);
+    assert.equal(state.flags.compromised_hosts_count, 0);
+
+    // 1. Before reading forensic files, Vespera Edge Gateway (10.88.4.22) is undiscovered
+    const gwBefore = state.networkHosts.find((h) => h.ip === '10.88.4.22')!;
+    assert.equal(gwBefore.discovered, false);
+
+    // 2. Attempting exploit on 172.16.40.12 before nmap port scan is blocked
+    state = executeDeadAirCommand(state, 'exploit 172.16.40.12');
+    assert.equal(
+      state.networkHosts.find((h) => h.ip === '172.16.40.12')?.compromised,
+      false
+    );
+    assert.match(
+      state.terminalHistory[state.terminalHistory.length - 1].text,
+      /nmap 172\.16\.40\.12/
+    );
+
+    // 3. Scanning 172.16.40.12 with nmap marks it scanned and unlocks exploit after first phone choice
+    state = handleFirstPhoneChoice(state, 'TRACE_SMS');
+    state = executeDeadAirCommand(state, 'nmap 172.16.40.12');
+    assert.equal(
+      state.networkHosts.find((h) => h.ip === '172.16.40.12')?.scanned,
+      true
+    );
+
+    state = executeDeadAirCommand(state, 'exploit 172.16.40.12');
+    const relayAfter = state.networkHosts.find((h) => h.ip === '172.16.40.12')!;
+    assert.equal(relayAfter.compromised, true);
+    assert.equal(relayAfter.privilege, 'OPERATOR');
+    assert.equal(state.flags.compromised_hosts_count, 1);
+
+    // 4. Attempting to exploit Vespera Edge Gateway (10.88.4.22) before inspecting auth_shadow.dump is blocked
+    state = inspectVirtualFile(
+      state,
+      '/home/eli/Downloads/incident_0427/access_0427.log'
+    );
+    assert.equal(
+      state.networkHosts.find((h) => h.ip === '10.88.4.22')?.discovered,
+      true
+    );
+    state = executeDeadAirCommand(state, 'nmap 10.88.4.22');
+    state = executeDeadAirCommand(state, 'exploit 10.88.4.22');
+    assert.equal(
+      state.networkHosts.find((h) => h.ip === '10.88.4.22')?.compromised,
+      false
+    );
+    assert.match(
+      state.terminalHistory[state.terminalHistory.length - 1].text,
+      /Unrevoked shadow session token required/
+    );
+
+    // 5. Inspecting auth_shadow.dump (EV-03) unlocks svc_lantern_sync shadow token -> exploit 10.88.4.22 grants ROOT
+    state = inspectVirtualFile(
+      state,
+      '/home/eli/Downloads/incident_0427/auth_shadow.dump'
+    );
+    state = executeDeadAirCommand(state, 'exploit 10.88.4.22');
+    const gwAfter = state.networkHosts.find((h) => h.ip === '10.88.4.22')!;
+    assert.equal(gwAfter.compromised, true);
+    assert.equal(gwAfter.privilege, 'ROOT');
+    assert.equal(state.flags.compromised_hosts_count, 2);
+  });
+
+  it('21. executes V0.3 tactical host operations (pivot, scrub, dump) with persistent narrative consequences and camera protection', () => {
+    let state = createInitialDeadAirState('playing');
+    // Trigger high exposure first (+15 -> exposure 25, suspicion 30)
+    state = handleFirstPhoneChoice(state, 'CALL_NADIA');
+    assert.equal(state.flags.player_exposure, 25);
+    assert.equal(state.flags.corporate_suspicion, 30);
+    assert.equal(state.flags.camera_tracking_risk, true);
+
+    // 1. Compromise and pivot through 172.16.40.12 -> activates dark-fiber proxy tunnel (-10 exposure) and logs grant +5 Nadia trust
+    state = executeDeadAirCommand(state, 'nmap 172.16.40.12');
+    state = executeDeadAirCommand(state, 'exploit 172.16.40.12');
+    const trustBeforeLogs = state.flags.trust_nadia;
+    state = executeDeadAirCommand(state, 'logs 172.16.40.12');
+    assert.equal(state.flags.trust_nadia, trustBeforeLogs + 5);
+
+    state = executeDeadAirCommand(state, 'pivot 172.16.40.12');
+    assert.equal(state.flags.relay_tunnel_active, true);
+    assert.equal(state.flags.player_exposure, 15);
+    // Repeat pivot is idempotent
+    state = executeDeadAirCommand(state, 'pivot 172.16.40.12');
+    assert.equal(state.flags.player_exposure, 15);
+
+    // 2. Compromise and scrub 4th Ave Municipal Camera Pole #04 (10.40.4.18) -> sets camera_scrubbed = true (-10 exposure, -5 suspicion)
+    state = executeDeadAirCommand(state, 'nmap 10.40.4.18');
+    state = executeDeadAirCommand(state, 'exploit 10.40.4.18');
+    state = executeDeadAirCommand(state, 'scrub 10.40.4.18');
+    assert.equal(state.flags.camera_scrubbed, true);
+    assert.equal(state.flags.player_exposure, 5);
+    assert.equal(state.flags.corporate_suspicion, 25);
+
+    // Even if exposure is raised above 20 again, inspecting hs_camera on STREET_NIGHT will NOT lock onto Eli because NVRAM was scrubbed!
+    state = executeDeadAirCommand(state, 'probe 10.88.14.9'); // +15 suspicion (40), +15 exposure (20)
+    assert.equal(state.flags.player_exposure, 20);
+
+    state = inspectVirtualFile(
+      state,
+      '/home/eli/Downloads/incident_0427/ntp_override.conf'
+    );
+    state = inspectVirtualFile(
+      state,
+      '/home/eli/Downloads/incident_0427/access_0427.log'
+    );
+    state = inspectVirtualFile(
+      state,
+      '/home/eli/Downloads/incident_0427/auth_shadow.dump'
+    );
+    state = correlateEvidenceTimeline(state);
+    state = transitionToScene(state, 'STREET_NIGHT');
+
+    const suspicionBeforeCam = state.flags.corporate_suspicion;
+    state = inspectHotspot(state, 'hs_camera');
+    assert.equal(state.flags.camera_tracked, false);
+    assert.equal(state.flags.corporate_suspicion, suspicionBeforeCam);
+
+    // 3. Compromise and dump Vespera Edge Gateway (10.88.4.22) -> secures cryptographic counter-proof against Marcus Hale (-5 suspicion)
+    state = executeDeadAirCommand(state, 'nmap 10.88.4.22');
+    state = executeDeadAirCommand(state, 'exploit 10.88.4.22');
+    state = executeDeadAirCommand(state, 'dump 10.88.4.22');
+    assert.equal(state.flags.counter_proof_secured, true);
+    assert.equal(state.flags.corporate_suspicion, suspicionBeforeCam - 5);
+  });
+
+  it('22. enforces fq-book curriculum attribution, lesson prerequisites, and diagnostic gating before analytical resolution', () => {
+    let state = createInitialDeadAirState('playing');
+    assert.equal(ALL_LEARNING_LESSONS.length, 7);
+    assert.match(FQ_BOOK_ATTRIBUTION_HEADER.upstreamRepository, /hoochanlon\/fq-book/);
+    assert.ok(CURATED_SOURCE_REGISTRY.some((s) => s.curationDecision === 'excluded_unverified'));
+
+    // Level 03 (Certificates) requires Level 02 (DNS) first
+    state = openNetworkLabForLesson(state, 'lesson_03_certificates');
+    assert.equal(state.learning.activeLabLessonId, null);
+    assert.match(state.lastFeedbackBanner || '', /Prerequisite required/);
+
+    // Launching Level 02 (DNS Investigation MVP Lab 01) succeeds
+    state = openNetworkLabForLesson(state, 'lesson_02_dns');
+    assert.equal(state.learning.activeLabLessonId, 'lesson_02_dns');
+
+    // Attempting analytical resolution before running the 2 critical diagnostics is blocked
+    state = submitLabResolution(state, 'lesson_02_dns', 'res_02_sanitize_dns');
+    assert.equal(state.learning.completedLessonIds.includes('lesson_02_dns'), false);
+    assert.match(state.lastFeedbackBanner || '', /Run diagnostic evidence first/);
+  });
+
+  it('23. completes all 3 MVP Core Labs (DNS, Certificates, Proxy/Tunnel), unlocks capabilities, and applies CLI tools to the investigation', () => {
+    let state = createInitialDeadAirState('playing');
+    // Start with elevated suspicion/exposure from CALL_NADIA (suspicion 30, exposure 25)
+    state = handleFirstPhoneChoice(state, 'CALL_NADIA');
+    assert.equal(state.flags.corporate_suspicion, 30);
+    assert.equal(state.flags.player_exposure, 25);
+
+    // --- MVP Lab 01: DNS Investigation (lesson_02_dns) ---
+    state = executeLabDiagnosticStep(state, 'lesson_02_dns', 'diag_dns_hosts');
+    state = executeLabDiagnosticStep(
+      state,
+      'lesson_02_dns',
+      'diag_dns_compare_resolvers'
+    );
+    state = submitLabResolution(state, 'lesson_02_dns', 'res_02_sanitize_dns');
+    assert.ok(state.learning.completedLessonIds.includes('lesson_02_dns'));
+    assert.ok(
+      state.learning.unlockedCapabilities.includes('resolver_inspector')
+    );
+
+    // Apply via terminal CLI `dns-inspect`
+    const suspBeforeDns = state.flags.corporate_suspicion;
+    const expBeforeDns = state.flags.player_exposure;
+    state = executeDeadAirCommand(state, 'dns-inspect');
+    assert.ok(state.learning.appliedStoryLessons.includes('lesson_02_dns'));
+    assert.equal(state.flags.corporate_suspicion, suspBeforeDns - 5);
+    assert.equal(state.flags.player_exposure, expBeforeDns - 5);
+
+    // --- MVP Lab 02: Certificate Forensics (lesson_03_certificates) ---
+    // Prerequisite lesson_02_dns is now complete!
+    state = openNetworkLabForLesson(state, 'lesson_03_certificates');
+    assert.equal(state.learning.activeLabLessonId, 'lesson_03_certificates');
+    state = executeLabDiagnosticStep(
+      state,
+      'lesson_03_certificates',
+      'diag_cert_chain'
+    );
+    state = executeLabDiagnosticStep(
+      state,
+      'lesson_03_certificates',
+      'diag_cert_pin_compare'
+    );
+    state = submitLabResolution(
+      state,
+      'lesson_03_certificates',
+      'res_03_revoke_and_pin'
+    );
+    assert.ok(
+      state.learning.unlockedCapabilities.includes('certificate_analyzer')
+    );
+
+    // Apply via terminal CLI `cert-verify`
+    state = executeDeadAirCommand(state, 'cert-verify');
+    assert.ok(
+      state.learning.appliedStoryLessons.includes('lesson_03_certificates')
+    );
+
+    // --- MVP Lab 03: Proxy & Tunnel Route (lesson_04_proxy_vpn) ---
+    state = executeLabDiagnosticStep(
+      state,
+      'lesson_04_proxy_vpn',
+      'diag_route_trace'
+    );
+    state = executeLabDiagnosticStep(
+      state,
+      'lesson_04_proxy_vpn',
+      'diag_dns_leak_test'
+    );
+    state = submitLabResolution(
+      state,
+      'lesson_04_proxy_vpn',
+      'res_04_encrypted_multihop'
+    );
+    assert.ok(
+      state.learning.unlockedCapabilities.includes('proxy_route_editor')
+    );
+    assert.ok(state.learning.unlockedCapabilities.includes('tunnel_monitor'));
+
+    // Apply via UI action
+    state = applyLessonCapabilityToStory(
+      state,
+      'lesson_04_proxy_vpn',
+      'analytical'
+    );
+    assert.ok(
+      state.learning.appliedStoryLessons.includes('lesson_04_proxy_vpn')
+    );
+    assert.equal(state.flags.player_exposure, 0);
+  });
+
+  it('24. contrasts analytical knowledge application against brute-force unverified shortcuts with persistent risk penalties', () => {
+    let state = createInitialDeadAirState('playing');
+    const baseSuspicion = state.flags.corporate_suspicion; // 15
+    const baseExposure = state.flags.player_exposure; // 10
+
+    // Attempting to apply analytical capability before unlocking it is rejected
+    state = executeDeadAirCommand(state, 'dns-inspect');
+    assert.equal(
+      state.learning.appliedStoryLessons.includes('lesson_02_dns'),
+      false
+    );
+    assert.match(state.lastFeedbackBanner || '', /Capability Locked/);
+
+    // Choosing the brute-force unverified path in story investigation without learning DNS principles adds +15% suspicion and +10% exposure
+    state = applyLessonCapabilityToStory(
+      state,
+      'lesson_02_dns',
+      'brute_force'
+    );
+    assert.ok(
+      state.learning.bruteForceStoryLessons.includes('lesson_02_dns')
+    );
+    assert.equal(state.flags.corporate_suspicion, baseSuspicion + 15);
+    assert.equal(state.flags.player_exposure, baseExposure + 10);
+  });
 });
+
+

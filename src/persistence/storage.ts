@@ -9,6 +9,10 @@ import {
   CURRENT_SAVE_VERSION,
   createInitialDeadAirState,
 } from '../data/storyData';
+import {
+  ALL_LEARNING_LESSONS,
+  CAPABILITY_DESCRIPTORS,
+} from '../data/learningMissions';
 import { migrateLearningState } from '../learning/learningProgress';
 import {
   KnowledgeCategoryId,
@@ -67,21 +71,33 @@ const VALID_CATEGORIES: (KnowledgeCategoryId | 'all')[] = [
   'container_appsec',
 ];
 
-const VALID_CAPABILITIES: UnlockedCapabilityId[] = [
-  'packet_inspector',
-  'resolver_inspector',
-  'certificate_analyzer',
-  'proxy_route_editor',
-  'tunnel_monitor',
-  'topology_mapper',
-  'archive_verifier',
-  'archive_search',
-  'persistence_auditor',
-  'tls_fingerprint_inspector',
-  'canary_inspector',
-  'hsm_verifier',
-  'binary_container_analyzer',
-];
+const VALID_LESSON_IDS = new Set<string>(
+  ALL_LEARNING_LESSONS.map((lesson) => lesson.id)
+);
+
+const VALID_CAPABILITY_IDS = new Set<UnlockedCapabilityId>(
+  Object.keys(CAPABILITY_DESCRIPTORS) as UnlockedCapabilityId[]
+);
+
+const VALID_TOOL_NAMES = new Set<string>([
+  ...ALL_LEARNING_LESSONS.flatMap((lesson) => lesson.unlocks.tools),
+  ...Object.values(CAPABILITY_DESCRIPTORS).map((cap) => cap.cliCommand),
+]);
+
+const VALID_CONCEPT_IDS = new Set<string>([
+  ...ALL_LEARNING_LESSONS.flatMap((lesson) =>
+    lesson.concepts.map((concept) => concept.id)
+  ),
+  // Preserve backward compatibility with V2 saves that recorded 'concept_dns_hierarchy'
+  'concept_dns_hierarchy',
+]);
+
+const VALID_DIAGNOSTIC_IDS_BY_LESSON = new Map<string, Set<string>>(
+  ALL_LEARNING_LESSONS.map((lesson) => [
+    lesson.id,
+    new Set(lesson.lab.diagnosticActions.map((diag) => diag.id)),
+  ])
+);
 
 function isPlainObject(val: unknown): val is Record<string, unknown> {
   return Boolean(val) && typeof val === 'object' && !Array.isArray(val);
@@ -147,6 +163,68 @@ function isValidFileEntry(
   return true;
 }
 
+function isValidDialogueChoice(choice: unknown): boolean {
+  if (!isPlainObject(choice)) return false;
+  if (
+    !isNonEmptyString(choice.id) ||
+    !isNonEmptyString(choice.label) ||
+    !isNonEmptyString(choice.labelZh)
+  ) {
+    return false;
+  }
+  if (choice.nextNodeId !== undefined && !isNonEmptyString(choice.nextNodeId)) {
+    return false;
+  }
+  if (
+    choice.trustDelta !== undefined &&
+    (typeof choice.trustDelta !== 'number' ||
+      !Number.isFinite(choice.trustDelta))
+  ) {
+    return false;
+  }
+  if (
+    choice.suspicionDelta !== undefined &&
+    (typeof choice.suspicionDelta !== 'number' ||
+      !Number.isFinite(choice.suspicionDelta))
+  ) {
+    return false;
+  }
+  if (
+    choice.exposureDelta !== undefined &&
+    (typeof choice.exposureDelta !== 'number' ||
+      !Number.isFinite(choice.exposureDelta))
+  ) {
+    return false;
+  }
+  if (
+    choice.unlocksEvidenceId !== undefined &&
+    !isNonEmptyString(choice.unlocksEvidenceId)
+  ) {
+    return false;
+  }
+  return true;
+}
+
+function isValidDialogueNode(node: unknown): boolean {
+  if (!isPlainObject(node)) return false;
+  if (
+    !isNonEmptyString(node.id) ||
+    !isNonEmptyString(node.speaker) ||
+    !isNonEmptyString(node.body) ||
+    !isNonEmptyString(node.bodyZh)
+  ) {
+    return false;
+  }
+  if (
+    !Array.isArray(node.choices) ||
+    node.choices.length === 0 ||
+    !node.choices.every(isValidDialogueChoice)
+  ) {
+    return false;
+  }
+  return true;
+}
+
 function isValidCharacterEntry(entry: unknown, strictV3 = false): boolean {
   if (!isPlainObject(entry)) return false;
   if (!isNonEmptyString(entry.id)) return false;
@@ -157,8 +235,37 @@ function isValidCharacterEntry(entry: unknown, strictV3 = false): boolean {
   if (strictV3) {
     if (
       !isNonEmptyString(entry.name) ||
+      !isNonEmptyString(entry.role) ||
+      !isNonEmptyString(entry.roleZh) ||
+      !isNonEmptyString(entry.location) ||
+      !isNonEmptyString(entry.stance) ||
+      !isNonEmptyString(entry.bio) ||
       !Array.isArray(entry.nodes) ||
-      entry.nodes.length === 0
+      entry.nodes.length === 0 ||
+      !entry.nodes.every(isValidDialogueNode)
+    ) {
+      return false;
+    }
+    const nodeIds = new Set(
+      entry.nodes.map((n) => (n as { id: string }).id)
+    );
+    if (!nodeIds.has(entry.currentNodeId)) {
+      return false;
+    }
+    for (const node of entry.nodes as Array<{
+      choices: Array<{ nextNodeId?: string }>;
+    }>) {
+      for (const choice of node.choices) {
+        if (choice.nextNodeId !== undefined && !nodeIds.has(choice.nextNodeId)) {
+          return false;
+        }
+      }
+    }
+  } else if (entry.nodes !== undefined) {
+    if (
+      !Array.isArray(entry.nodes) ||
+      entry.nodes.length === 0 ||
+      !entry.nodes.every(isValidDialogueNode)
     ) {
       return false;
     }
@@ -172,6 +279,49 @@ function isValidInventoryEntry(entry: unknown, strictV3 = false): boolean {
   if (typeof entry.acquired !== 'boolean') return false;
   if (strictV3 && !isNonEmptyString(entry.name)) return false;
   return true;
+}
+
+function isValidNetworkServiceEntry(svc: unknown): boolean {
+  if (!isPlainObject(svc)) return false;
+  if (
+    typeof svc.port !== 'number' ||
+    !Number.isInteger(svc.port) ||
+    svc.port < 1 ||
+    svc.port > 65535
+  ) {
+    return false;
+  }
+  if (svc.protocol !== 'tcp' && svc.protocol !== 'udp') {
+    return false;
+  }
+  if (!isNonEmptyString(svc.service) || !isNonEmptyString(svc.version)) {
+    return false;
+  }
+  if (
+    svc.state !== 'open' &&
+    svc.state !== 'filtered' &&
+    svc.state !== 'canary'
+  ) {
+    return false;
+  }
+  if (
+    svc.vulnerabilityNote !== undefined &&
+    !isNonEmptyString(svc.vulnerabilityNote)
+  ) {
+    return false;
+  }
+  return true;
+}
+
+function isValidHostLogEntry(log: unknown): boolean {
+  if (!isPlainObject(log)) return false;
+  return (
+    isNonEmptyString(log.id) &&
+    isNonEmptyString(log.timestamp) &&
+    isNonEmptyString(log.source) &&
+    isNonEmptyString(log.entry) &&
+    isNonEmptyString(log.entryZh)
+  );
 }
 
 function isValidNetworkHostEntry(entry: unknown, strictV3 = false): boolean {
@@ -188,7 +338,34 @@ function isValidNetworkHostEntry(entry: unknown, strictV3 = false): boolean {
     return false;
   }
   if (strictV3) {
-    if (!isNonEmptyString(entry.hostname) || !Array.isArray(entry.services)) {
+    if (
+      !isNonEmptyString(entry.hostname) ||
+      !isNonEmptyString(entry.role) ||
+      !isNonEmptyString(entry.roleZh) ||
+      !isNonEmptyString(entry.subnet) ||
+      typeof entry.targetPrivilege !== 'string' ||
+      !VALID_PRIVILEGES.includes(entry.targetPrivilege as HostPrivilegeLevel) ||
+      !Array.isArray(entry.services) ||
+      entry.services.length === 0 ||
+      !entry.services.every(isValidNetworkServiceEntry) ||
+      !Array.isArray(entry.logs) ||
+      !entry.logs.every(isValidHostLogEntry)
+    ) {
+      return false;
+    }
+  } else {
+    if (
+      entry.services !== undefined &&
+      (!Array.isArray(entry.services) ||
+        entry.services.length === 0 ||
+        !entry.services.every(isValidNetworkServiceEntry))
+    ) {
+      return false;
+    }
+    if (
+      entry.logs !== undefined &&
+      (!Array.isArray(entry.logs) || !entry.logs.every(isValidHostLogEntry))
+    ) {
       return false;
     }
   }
@@ -288,7 +465,7 @@ function isValidLearningObject(learning: unknown, strictV3 = false): boolean {
     !learning.unlockedCapabilities.every(
       (cap) =>
         typeof cap === 'string' &&
-        VALID_CAPABILITIES.includes(cap as UnlockedCapabilityId)
+        VALID_CAPABILITY_IDS.has(cap as UnlockedCapabilityId)
     )
   ) {
     return false;
@@ -321,6 +498,52 @@ function isValidLearningObject(learning: unknown, strictV3 = false): boolean {
   }
 
   if (strictV3) {
+    const completedIds = learning.completedLessonIds as string[];
+    const unlockedTools = learning.unlockedTools as string[];
+    const masteredConcepts = learning.masteredConcepts as string[];
+    const appliedStoryLessons = learning.appliedStoryLessons as string[];
+    const bruteForceStoryLessons = learning.bruteForceStoryLessons as string[];
+    const executedByLesson = learning.executedDiagnosticsByLesson as Record<
+      string,
+      string[]
+    >;
+    const resolutionByLesson = learning.labResolutionByLesson as Record<
+      string,
+      string
+    >;
+
+    if (
+      !completedIds.every((id) => VALID_LESSON_IDS.has(id)) ||
+      !unlockedTools.every((tool) => VALID_TOOL_NAMES.has(tool)) ||
+      !masteredConcepts.every((concept) => VALID_CONCEPT_IDS.has(concept)) ||
+      !appliedStoryLessons.every((id) => VALID_LESSON_IDS.has(id)) ||
+      !bruteForceStoryLessons.every((id) => VALID_LESSON_IDS.has(id))
+    ) {
+      return false;
+    }
+
+    if (
+      !Object.entries(executedByLesson).every(([lessonId, diagIds]) => {
+        const validDiags = VALID_DIAGNOSTIC_IDS_BY_LESSON.get(lessonId);
+        return (
+          validDiags !== undefined &&
+          diagIds.every((diagId) => validDiags.has(diagId))
+        );
+      })
+    ) {
+      return false;
+    }
+
+    if (
+      !Object.entries(resolutionByLesson).every(
+        ([lessonId, mode]) =>
+          VALID_LESSON_IDS.has(lessonId) &&
+          (mode === 'analytical' || mode === 'brute_force')
+      )
+    ) {
+      return false;
+    }
+
     if (
       typeof learning.activeSourceTrack !== 'string' ||
       !VALID_SOURCE_TRACKS.includes(
@@ -330,9 +553,11 @@ function isValidLearningObject(learning: unknown, strictV3 = false): boolean {
       !VALID_CATEGORIES.includes(
         learning.activeCategoryFilter as KnowledgeCategoryId | 'all'
       ) ||
-      !isNonEmptyString(learning.selectedLessonId) ||
+      typeof learning.selectedLessonId !== 'string' ||
+      !VALID_LESSON_IDS.has(learning.selectedLessonId) ||
       (learning.activeLabLessonId !== null &&
-        !isNonEmptyString(learning.activeLabLessonId))
+        (typeof learning.activeLabLessonId !== 'string' ||
+          !VALID_LESSON_IDS.has(learning.activeLabLessonId)))
     ) {
       return false;
     }
@@ -789,20 +1014,25 @@ export function loadDeadAirState(): DeadAirState {
     }
   }
 
-  const preserveMalformedV3BeforeOverwrite = () => {
-    if (malformedRawV3 !== null) {
-      try {
-        window.localStorage.setItem(
-          CORRUPTED_STORAGE_KEY_V3_BACKUP,
-          malformedRawV3
-        );
-      } catch {
-        // Ignore storage quota errors
-      }
+  const preserveMalformedV3BeforeOverwrite = (): boolean => {
+    if (malformedRawV3 === null) {
+      return true;
+    }
+    try {
+      window.localStorage.setItem(
+        CORRUPTED_STORAGE_KEY_V3_BACKUP,
+        malformedRawV3
+      );
+      const readBack = window.localStorage.getItem(
+        CORRUPTED_STORAGE_KEY_V3_BACKUP
+      );
+      return readBack === malformedRawV3;
+    } catch {
+      return false;
     }
   };
 
-  // 2. Try V2 legacy storage key -> migrate to V3 and write V3 only after successful migration
+  // 2. Try V2 legacy storage key -> migrate to V3 and write V3 only after successful migration and backup verification
   try {
     const rawV2 = window.localStorage.getItem(LEGACY_STORAGE_KEY_V2);
     if (rawV2) {
@@ -810,8 +1040,9 @@ export function loadDeadAirState(): DeadAirState {
       if (isValidLegacySaveShape(parsedV2)) {
         const migrated = migrateDeadAirSave(parsedV2, autostart);
         if (isValidV3SaveShape(migrated)) {
-          preserveMalformedV3BeforeOverwrite();
-          saveDeadAirState(migrated);
+          if (preserveMalformedV3BeforeOverwrite()) {
+            saveDeadAirState(migrated);
+          }
           return migrated;
         }
       }
@@ -820,7 +1051,7 @@ export function loadDeadAirState(): DeadAirState {
     // Corrupted or incomplete V2 JSON: preserve it and fall through to V1
   }
 
-  // 3. Try V1 legacy storage key -> migrate to V3 and write V3 only after successful migration
+  // 3. Try V1 legacy storage key -> migrate to V3 and write V3 only after successful migration and backup verification
   try {
     const rawV1 = window.localStorage.getItem(LEGACY_STORAGE_KEY_V1);
     if (rawV1) {
@@ -828,8 +1059,9 @@ export function loadDeadAirState(): DeadAirState {
       if (isValidLegacySaveShape(parsedV1)) {
         const migrated = migrateDeadAirSave(parsedV1, autostart);
         if (isValidV3SaveShape(migrated)) {
-          preserveMalformedV3BeforeOverwrite();
-          saveDeadAirState(migrated);
+          if (preserveMalformedV3BeforeOverwrite()) {
+            saveDeadAirState(migrated);
+          }
           return migrated;
         }
       }

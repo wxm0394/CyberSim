@@ -2385,4 +2385,398 @@ describe('DEAD AIR V0.4.2 — Narrative Integrity, Workstation Access, Probe Int
       }
     }
   });
+
+  it('34. enforces nested element-level V3 validation for character dialogue nodes/choices, network host services/ports, and learning registry identifiers while preserving V2 learning progress and dynamic files', () => {
+    const validV3 = createInitialDeadAirState('playing');
+    assert.equal(isValidV3SaveShape(validV3), true);
+
+    const validV2WithLearningAndCleanPdf = {
+      saveVersion: 2,
+      shellState: 'playing',
+      currentScene: 'LAUNDROMAT',
+      unlockedScenes: ['APARTMENT_NIGHT', 'STREET_NIGHT', 'LAUNDROMAT'],
+      clockTime: '03:02 AM',
+      currentDir: '/home/eli/Documents',
+      terminalHistory: [
+        { id: 't-1', text: 'eli@greyos:~$ ls', tone: 'command' },
+      ],
+      completedEvents: ['event:first_phone_choice'],
+      inspectedFiles: ['/home/eli/Downloads/incident_0427/ntp_override.conf'],
+      flags: {
+        trust_nadia: 76,
+        corporate_suspicion: 14,
+        player_exposure: 10,
+      },
+      evidence: [
+        { id: 'EV-01', discovered: true, correlated: true },
+        { id: 'EV-02', discovered: true, correlated: true },
+      ],
+      files: [
+        {
+          name: 'incident_0427_brief.clean.pdf',
+          path: '/home/eli/Documents/incident_0427_brief.clean.pdf',
+          parentDir: '/home/eli/Documents',
+          size: '398.4 KB',
+          modifiedAt: 'Just now (Sanitized Copy)',
+          unlocked: true,
+          content: '%PDF-1.7 [SANITIZED FORENSIC COPY]',
+        },
+      ],
+      characters: [{ id: 'nadia', trust: 76, currentNodeId: 'nadia_node_1' }],
+      inventory: [{ id: 'item_moth_usb', acquired: true }],
+      learning: {
+        completedLessonIds: ['lesson_02_dns', 'lesson_07_osint_opsec'],
+        unlockedCapabilities: ['resolver_inspector', 'archive_search'],
+        unlockedTools: ['dns-inspect', 'archive-search'],
+        masteredConcepts: ['concept_dns_hierarchy'],
+        executedDiagnosticsByLesson: { lesson_02_dns: ['diag_dns_hosts'] },
+        labResolutionByLesson: { lesson_02_dns: 'analytical' },
+        appliedStoryLessons: ['lesson_02_dns'],
+        bruteForceStoryLessons: [],
+        activeCategoryFilter: 'investigation',
+        selectedLessonId: 'lesson_02_dns',
+        activeLabLessonId: null,
+      },
+    };
+
+    const nestedMalformedV3Cases: Array<{
+      name: string;
+      mutator: (base: ReturnType<typeof createInitialDeadAirState>) => unknown;
+    }> = [
+      {
+        name: '1. characters[].nodes: [{}]',
+        mutator: (b) => ({
+          ...b,
+          characters: b.characters.map((ch, idx) =>
+            idx === 0 ? { ...ch, nodes: [{}] } : ch
+          ),
+        }),
+      },
+      {
+        name: '2. characters[].nodes containing an invalid choice',
+        mutator: (b) => ({
+          ...b,
+          characters: b.characters.map((ch, idx) =>
+            idx === 0
+              ? {
+                  ...ch,
+                  nodes: ch.nodes.map((node, nIdx) =>
+                    nIdx === 0
+                      ? {
+                          ...node,
+                          choices: [{ id: 'bad_choice', label: 'Missing labelZh' }],
+                        }
+                      : node
+                  ),
+                }
+              : ch
+          ),
+        }),
+      },
+      {
+        name: '3. networkHosts[].services: [{}]',
+        mutator: (b) => ({
+          ...b,
+          networkHosts: b.networkHosts.map((host, idx) =>
+            idx === 0 ? { ...host, services: [{}] } : host
+          ),
+        }),
+      },
+      {
+        name: '4. networkHosts[].services with an invalid port (70000)',
+        mutator: (b) => ({
+          ...b,
+          networkHosts: b.networkHosts.map((host, idx) =>
+            idx === 0
+              ? {
+                  ...host,
+                  services: host.services.map((svc, sIdx) =>
+                    sIdx === 0 ? { ...svc, port: 70000 } : svc
+                  ),
+                }
+              : host
+          ),
+        }),
+      },
+      {
+        name: '5. unknown lesson ID in V3 learning state (completedLessonIds)',
+        mutator: (b) => ({
+          ...b,
+          learning: {
+            ...b.learning,
+            completedLessonIds: ['lesson_02_dns', 'lesson_99_unknown'],
+          },
+        }),
+      },
+      {
+        name: '6. unknown selectedLessonId in V3 learning state',
+        mutator: (b) => ({
+          ...b,
+          learning: {
+            ...b.learning,
+            selectedLessonId: 'lesson_99_nonexistent',
+          },
+        }),
+      },
+      {
+        name: '7. invalid nested learning diagnostic entry in executedDiagnosticsByLesson',
+        mutator: (b) => ({
+          ...b,
+          learning: {
+            ...b.learning,
+            executedDiagnosticsByLesson: {
+              lesson_02_dns: ['diag_dns_hosts', 'diag_invalid_for_dns'],
+            },
+          },
+        }),
+      },
+    ];
+
+    const store = new Map<string, string>();
+    const prevWindow = (globalThis as unknown as { window?: unknown }).window;
+    (globalThis as unknown as { window: unknown }).window = {
+      location: { search: '?autostart=1' },
+      localStorage: {
+        getItem: (k: string) => (store.has(k) ? store.get(k)! : null),
+        setItem: (k: string, v: string) => {
+          store.set(k, String(v));
+        },
+        removeItem: (k: string) => {
+          store.delete(k);
+        },
+      },
+    };
+
+    try {
+      for (const testCase of nestedMalformedV3Cases) {
+        const candidateObj = testCase.mutator(
+          JSON.parse(JSON.stringify(validV3))
+        );
+        const rawMalformedV3 = JSON.stringify(candidateObj);
+        assert.equal(
+          isValidV3SaveShape(candidateObj),
+          false,
+          `Expected isValidV3SaveShape to return false for ${testCase.name}`
+        );
+
+        store.clear();
+        const rawV2String = JSON.stringify(validV2WithLearningAndCleanPdf);
+        store.set(STORAGE_KEY_V3, rawMalformedV3);
+        store.set(LEGACY_STORAGE_KEY_V2, rawV2String);
+
+        const restoredState = loadDeadAirState();
+        assert.equal(
+          isValidV3SaveShape(restoredState),
+          true,
+          `Restored state from V2 must pass isValidV3SaveShape for ${testCase.name}`
+        );
+        assert.equal(restoredState.currentScene, 'LAUNDROMAT');
+        assert.equal(restoredState.flags.trust_nadia, 76);
+        assert.deepEqual(restoredState.learning.completedLessonIds, [
+          'lesson_02_dns',
+          'lesson_07_osint_opsec',
+        ]);
+        assert.deepEqual(restoredState.learning.executedDiagnosticsByLesson, {
+          lesson_02_dns: ['diag_dns_hosts'],
+        });
+        assert.ok(
+          restoredState.files.some(
+            (f) =>
+              f.path === '/home/eli/Documents/incident_0427_brief.clean.pdf'
+          ),
+          `Dynamic clean PDF file must remain intact for ${testCase.name}`
+        );
+        assert.equal(
+          store.get(CORRUPTED_STORAGE_KEY_V3_BACKUP),
+          rawMalformedV3
+        );
+        assert.equal(store.get(LEGACY_STORAGE_KEY_V2), rawV2String);
+      }
+    } finally {
+      if (prevWindow === undefined) {
+        delete (globalThis as unknown as { window?: unknown }).window;
+      } else {
+        (globalThis as unknown as { window: unknown }).window = prevWindow;
+      }
+    }
+  });
+
+  it('35. makes corrupted V3 backup preservation fail-safe (raw invalid JSON, write failure, read-back mismatch, and normal V3 load)', () => {
+    const validV3 = createInitialDeadAirState('playing');
+    const validV2 = {
+      saveVersion: 2,
+      shellState: 'playing',
+      currentScene: 'LAUNDROMAT',
+      unlockedScenes: ['APARTMENT_NIGHT', 'STREET_NIGHT', 'LAUNDROMAT'],
+      clockTime: '03:05 AM',
+      flags: {
+        trust_nadia: 78,
+        corporate_suspicion: 12,
+        player_exposure: 8,
+      },
+      evidence: [{ id: 'EV-01', discovered: true, correlated: true }],
+      files: [],
+      characters: [{ id: 'nadia', trust: 78, currentNodeId: 'nadia_node_1' }],
+      inventory: [{ id: 'item_moth_usb', acquired: true }],
+    };
+    const validV1 = {
+      shellState: 'playing',
+      currentScene: 'STREET_NIGHT',
+      clockTime: '02:44 AM',
+      flags: {
+        trust_nadia: 64,
+        corporate_suspicion: 18,
+        player_exposure: 15,
+      },
+      evidence: [{ id: 'EV-01', discovered: true, correlated: true }],
+      files: [],
+      characters: [{ id: 'nadia', trust: 64, currentNodeId: 'nadia_node_1' }],
+    };
+
+    const store = new Map<string, string>();
+    let throwOnBackupSetItem = false;
+    let corruptBackupGetItemReadBack = false;
+
+    const prevWindow = (globalThis as unknown as { window?: unknown }).window;
+    (globalThis as unknown as { window: unknown }).window = {
+      location: { search: '?autostart=1' },
+      localStorage: {
+        getItem: (k: string) => {
+          if (
+            k === CORRUPTED_STORAGE_KEY_V3_BACKUP &&
+            corruptBackupGetItemReadBack
+          ) {
+            return 'TRUNCATED_READBACK_MISMATCH';
+          }
+          return store.has(k) ? store.get(k)! : null;
+        },
+        setItem: (k: string, v: string) => {
+          if (k === CORRUPTED_STORAGE_KEY_V3_BACKUP && throwOnBackupSetItem) {
+            throw new Error('QuotaExceededError: Failed to write backup key');
+          }
+          store.set(k, String(v));
+        },
+        removeItem: (k: string) => {
+          store.delete(k);
+        },
+      },
+    };
+
+    try {
+      const rawInvalidJsonV3 = '{"saveVersion":3,"flags":';
+      const rawValidV2 = JSON.stringify(validV2);
+      const rawValidV1 = JSON.stringify(validV1);
+
+      // Case A — Raw invalid JSON in V3 + valid V2
+      store.clear();
+      store.set(STORAGE_KEY_V3, rawInvalidJsonV3);
+      store.set(LEGACY_STORAGE_KEY_V2, rawValidV2);
+
+      const stateA = loadDeadAirState();
+      assert.equal(stateA.currentScene, 'LAUNDROMAT');
+      assert.equal(stateA.flags.trust_nadia, 78);
+      assert.equal(
+        store.get(CORRUPTED_STORAGE_KEY_V3_BACKUP),
+        rawInvalidJsonV3,
+        'Case A: exact raw invalid JSON string must be preserved byte-for-byte in backup key'
+      );
+      assert.equal(
+        isValidV3SaveShape(JSON.parse(store.get(STORAGE_KEY_V3)!)),
+        true,
+        'Case A: new V3 save must be valid after backup verification succeeds'
+      );
+      assert.equal(
+        store.get(LEGACY_STORAGE_KEY_V2),
+        rawValidV2,
+        'Case A: V2 backup must remain unchanged'
+      );
+
+      // Case B — Corrupt V3 + malformed V2 + valid V1
+      store.clear();
+      const rawMalformedV2 = '{"saveVersion":2,"flags":';
+      store.set(STORAGE_KEY_V3, rawInvalidJsonV3);
+      store.set(LEGACY_STORAGE_KEY_V2, rawMalformedV2);
+      store.set(LEGACY_STORAGE_KEY_V1, rawValidV1);
+
+      const stateB = loadDeadAirState();
+      assert.equal(stateB.currentScene, 'STREET_NIGHT');
+      assert.equal(stateB.flags.trust_nadia, 64);
+      assert.equal(
+        store.get(CORRUPTED_STORAGE_KEY_V3_BACKUP),
+        rawInvalidJsonV3,
+        'Case B: corrupt V3 must be backed up byte-for-byte'
+      );
+      assert.equal(
+        store.get(LEGACY_STORAGE_KEY_V2),
+        rawMalformedV2,
+        'Case B: V2 must not be overwritten or deleted'
+      );
+      assert.equal(
+        store.get(LEGACY_STORAGE_KEY_V1),
+        rawValidV1,
+        'Case B: V1 must not be overwritten or deleted'
+      );
+      assert.equal(
+        isValidV3SaveShape(JSON.parse(store.get(STORAGE_KEY_V3)!)),
+        true
+      );
+
+      // Case C — Backup write failure (setItem throws on CORRUPTED_STORAGE_KEY_V3_BACKUP)
+      store.clear();
+      store.set(STORAGE_KEY_V3, rawInvalidJsonV3);
+      store.set(LEGACY_STORAGE_KEY_V2, rawValidV2);
+      throwOnBackupSetItem = true;
+      try {
+        const stateC = loadDeadAirState();
+        assert.equal(stateC.currentScene, 'LAUNDROMAT');
+        assert.equal(
+          store.get(STORAGE_KEY_V3),
+          rawInvalidJsonV3,
+          'Case C: dead_air_save_v3 must NOT be overwritten when backup write fails'
+        );
+        assert.equal(
+          store.has(CORRUPTED_STORAGE_KEY_V3_BACKUP),
+          false,
+          'Case C: backup key must not be falsely populated when setItem throws'
+        );
+      } finally {
+        throwOnBackupSetItem = false;
+      }
+
+      // Case D — Backup read-back mismatch (getItem returns a different value than written)
+      store.clear();
+      store.set(STORAGE_KEY_V3, rawInvalidJsonV3);
+      store.set(LEGACY_STORAGE_KEY_V2, rawValidV2);
+      corruptBackupGetItemReadBack = true;
+      try {
+        const stateD = loadDeadAirState();
+        assert.equal(stateD.currentScene, 'LAUNDROMAT');
+        assert.equal(
+          store.get(STORAGE_KEY_V3),
+          rawInvalidJsonV3,
+          'Case D: dead_air_save_v3 must NOT be overwritten when backup read-back verification fails'
+        );
+      } finally {
+        corruptBackupGetItemReadBack = false;
+      }
+
+      // Case E — Normal valid V3 save does not touch CORRUPTED_STORAGE_KEY_V3_BACKUP
+      store.clear();
+      saveDeadAirState(validV3);
+      assert.equal(store.has(CORRUPTED_STORAGE_KEY_V3_BACKUP), false);
+      const stateE = loadDeadAirState();
+      assert.equal(isValidV3SaveShape(stateE), true);
+      assert.equal(
+        store.has(CORRUPTED_STORAGE_KEY_V3_BACKUP),
+        false,
+        'Case E: normal valid V3 loading must not touch CORRUPTED_STORAGE_KEY_V3_BACKUP'
+      );
+    } finally {
+      if (prevWindow === undefined) {
+        delete (globalThis as unknown as { window?: unknown }).window;
+      } else {
+        (globalThis as unknown as { window: unknown }).window = prevWindow;
+      }
+    }
+  });
 });
